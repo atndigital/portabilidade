@@ -107,7 +107,7 @@
     if (error) { if (!silencioso) $('#content').replaceChildren(el('div', { class: 'empty' }, el('strong', { text: 'Não foi possível abrir a base' }), el('span', { text: error.message }))); return; }
     const ult = {}; for (const c of data) if (!ult[c.tipo]) ult[c.tipo] = c;
     let mudou = false;
-    for (const tipo of ['vendas', 'entregas', 'conectadas']) {
+    for (const tipo of ['vendas', 'conectadas']) {
       const c = ult[tipo]; if (!c) continue;
       if (CARGAS[tipo] && CARGAS[tipo].id === c.id && RAW[tipo[0].toUpperCase()]) continue;
       let base = null; const cache = await IDB.get(tipo);
@@ -128,13 +128,15 @@
   function prepare() {
     const vmap = new Map(); (RAW.V || []).forEach(r => r.p && vmap.set(r.p, r));
     HOJE = dn(isoLocal(new Date()));
-    if (RAW.E) { let mx = 0; for (const r of RAW.E) { mx = Math.max(mx, dn(r.de)); const v = vmap.get(r.p); r.uf = v ? v.uf : null; } REF_E = mx + 1; for (const r of RAW.E) { r.obs = REF_E - dn(r.de); r.lag = r.pd ? dn(r.pd) - dn(r.de) : null; } }
+    // Entregas de chip: montadas a partir do relatório de vendas (pedido entregue; data da entrega = data do status Bluechip)
+    RAW.E = RAW.V ? RAW.V.filter(r => r.bg === 'Entregue' && r.dbs).map(r => ({ p: r.p, dv: r.dv, de: r.dbs, emp: r.emp, eq: r.eq, ace: !!r.aceOp, pos: r.pos, pt: r.pt, pm: r.pm, pd: r.pd, fl: r.fl, sms: r.sms, so: r.so, pa: r.pa, chip: r.chip })) : null;
+    if (RAW.E && RAW.E.length) { let mx = 0; for (const r of RAW.E) { mx = Math.max(mx, dn(r.de)); const v = vmap.get(r.p); r.uf = v ? v.uf : null; } REF_E = mx + 1; for (const r of RAW.E) { r.obs = REF_E - dn(r.de); r.lag = r.pd ? dn(r.pd) - dn(r.de) : null; } }
     if (RAW.C) for (const r of RAW.C) { const v = vmap.get(r.p); r.uf = v ? v.uf : null; r.dAt = r.dv ? dn(r.da) - dn(r.dv) : null; }
     if (RAW.V) for (const r of RAW.V) { r.dEnt = r.bg === 'Entregue' && r.dbs ? dn(r.dbs) - dn(r.dv) : null; r.rep = /reprocessado/i.test(r.fl || ''); }
   }
   function setStatus() {
     const s = $('#status'); s.replaceChildren();
-    const parts = [['vendas', 'Vendas'], ['entregas', 'Entregas'], ['conectadas', 'Conectadas']].filter(([t]) => CARGAS[t]);
+    const parts = [['vendas', 'Vendas e entregas'], ['conectadas', 'Conectadas']].filter(([t]) => CARGAS[t]);
     if (!parts.length) { s.textContent = 'Nenhuma base carregada'; return; }
     parts.forEach(([t, n], i) => { if (i) s.append(' · '); s.append(n + ': ', el('b', { text: fDT(CARGAS[t].enviado_em) })); });
   }
@@ -287,10 +289,13 @@
   const clsConc = v => v == null ? '' : v >= .6 ? 'good' : v >= .5 ? 'warn' : v < .45 ? 'bad' : '';
   function corteAtual() { const auto = nd(REF_E - 4); const c = LS.get('corte', null); return { auto, val: c || auto, manual: !!c }; }
   function rTratativa(root) {
-    if (!RAW.E) return semBase('entregas', root);
+    if (!RAW.E) return semBase('vendas', root);
     const E = filt(RAW.E, 'de');
     const corte = corteAtual();
-    root.append(el('p', { class: 'lead', text: 'Base: relatório de entregas, pela data de entrega do chip. Contato efetivo = pedido com pós-venda registrado. SMS respondido = pedido com aceite de voz registrado.' }));
+    const bExp = el('button', { class: 'btn', hidden: !podeEditar() }, 'Exportar Entregas de chip'), mExp = el('span', { class: 'msg' });
+    bExp.addEventListener('click', () => exportarEntregas(mExp));
+    root.append(el('p', { class: 'lead', text: 'Entregas de chip montadas a partir do relatório de vendas: pedidos com status "Pedido Entregue" na Bluechip, pela data desse status. Contato efetivo = pedido com pós-venda registrado. SMS respondido = pedido com aceite de voz registrado.' }),
+      el('div', { class: 'toolbar' }, bExp, mExp, el('span', { class: 'note', text: 'A exportação segue os filtros de mês, período, empresa e equipe.' })));
     const be = byEmp(E);
     const tl = el('div', { class: 'tiles' });
     tl.append(tileEmp('Contato efetivo', e => ({ v: fP(pct(count(be[e], r => r.pos), be[e].length)), sub: [el('b', { text: fI(count(be[e], r => r.pos)) }), ` de ${fI(be[e].length)} entregas`] }), true));
@@ -338,7 +343,7 @@
   function rPort(root) {
     if (RAW.E) {
       const E = filt(RAW.E, 'de'), be = byEmp(E);
-      root.append(el('p', { class: 'lead', text: 'Curvas: relatório de entregas, dias da entrega até o portin. Para cada prazo só entram entregas que já tiveram aquele número de dias. Fila de retargeting e mailings: relatório de vendas, atualizado de hora em hora.' }));
+      root.append(el('p', { class: 'lead', text: 'Curvas: entregas de chip (do relatório de vendas), dias da entrega até o portin. Para cada prazo só entram entregas que já tiveram aquele número de dias. Fila de retargeting e mailings: relatório de vendas, atualizado de hora em hora.' }));
       const tl = el('div', { class: 'tiles' });
       const TT = (k, fn) => tl.append(tileEmp(k, e => ({ v: fP(fn(be[e])) })));
       TT('Concluem até D+3', r => curva(r, 3)); TT('Concluem até D+6', r => curva(r, 6)); TT('Concluem até D+10', r => curva(r, 10));
@@ -541,6 +546,35 @@
       card('Data máxima prevista × forma de entrega', 'Vermelho: com atraso. Verde: em dia. Quanto mais forte a cor, mais pedidos.', t4), hold);
     bExp.addEventListener('click', () => exportarRota(msg, nomeRota()));
   }
+  // Exporta "Entregas de chip" no layout que a equipe usa, a partir do relatório de vendas
+  async function exportarEntregas(msg) {
+    msg.className = 'msg'; msg.textContent = 'Escolha o relatório de vendas do dia…';
+    const f = await escolherArquivo(); if (!f) { msg.textContent = ''; return; }
+    msg.textContent = 'Montando a planilha…';
+    const { head, rows } = await lerCelulas(f);
+    const I = (...n) => idx(head, ...n);
+    const iBS = I('Bluechip Status'), iBD = I('Bluechip Data Status'), iPl = I('Plataforma'), iEq = I('Nome Equipe');
+    if (iBS < 0 || iBD < 0) { msg.className = 'msg err'; msg.textContent = `"${f.name}" não é o relatório de vendas.`; return; }
+    const MAPA = [['DATA_VENDA', 'Data venda'], ['DATA_ENTREGA', 'Bluechip Data Status'], ['CPF', 'CPF'], ['NOME', 'Cliente'], ['TELEFONE_PORTADO', 'Telefone Portabilidade'], ['NUMERO_LINHA', 'Numero linha'],
+      ['VENDEDOR', 'Nome vendedor'], ['EQUIPE', 'Nome Equipe'], ['ACEITE DE VOZ', 'Aceite de Voz'], ['DATA ACEITE VOZ', 'Data aceite voz'], ['POS VENDA', 'Pos venda'], ['DATA POS VENDA', 'Data pos venda'],
+      ['PORTABILIDADE', 'Portabilidade'], ['COMPLEMENTO PORTABILIDADE', 'Complemento Portabilidade'], ['PLATAFORMA CONECTADA', 'Plataforma'], ['PROPOSTA', 'Proposta iSize'], ['FLAG', 'Flag'],
+      ['NUMERO OS', 'Numero OS'], ['SMS PREVIO', 'SMS Previo'], ['STATUS DA ORDEM', 'Status Ordem'], ['PORT ANTECIPADA', 'Portabilidade Antecipada'], ['TIPO CHIP', 'Tipo Chip']].map(([o, s]) => [o, idx(head, s)]);
+    const v = (r, i) => i < 0 || !r[i] ? null : r[i].v;
+    const emp = r => { const p = String(v(r, iPl) || '').trim().toUpperCase(); return p === 'ATN' || p === 'DAHA' ? p : /^DAHA/i.test(String(v(r, iEq) || '')) ? 'DAHA' : 'ATN'; };
+    const sel = rows.filter(r => {
+      if (PROC.bluechip(v(r, iBS))[0] !== 'Entregue') return false;
+      const d = PROC.toDay(v(r, iBD)); if (!d) return false;
+      if (F.mes && d.slice(0, 7) !== F.mes) return false; if (F.ini && d < F.ini) return false; if (F.fim && d > F.fim) return false;
+      if (F.emp && emp(r) !== F.emp) return false; if (F.eq && String(v(r, iEq) || '').trim() !== F.eq) return false;
+      return true;
+    }).sort((a, b) => String(PROC.toDT(v(a, iBD))).localeCompare(String(PROC.toDT(v(b, iBD)))));
+    const S = x => ({ t: 's', v: x });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([MAPA.map(m => S(m[0])), ...sel.map(r => MAPA.map(([, i]) => i < 0 ? null : r[i]))]), 'Propostas diarias');
+    const hoje = new Date(); const nome = `ENTREGAS_DE_CHIP_${pad(hoje.getDate())}${pad(hoje.getMonth() + 1)}.xlsx`;
+    XLSX.writeFile(wb, nome);
+    msg.className = 'msg ok'; msg.textContent = `${nome}: ${fI(sel.length)} entregas.`;
+  }
   // Lê a planilha mantendo cada célula como no original (datas com o mesmo formato)
   async function lerCelulas(file) {
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', dense: true, cellNF: true });
@@ -720,7 +754,7 @@
   /* ================= upload ================= */
   const PEND = {};
   const NOMES = { vendas: 'Vendas', entregas: 'Entregas de chip', conectadas: 'Conectadas', gross: 'Gross TIM' };
-  function slots() { $('#slots').replaceChildren(...['vendas', 'entregas', 'conectadas'].map(k => el('div', { class: 'slot' + (PEND[k] ? ' ok' : '') }, el('b', { text: NOMES[k] }), el('div', { class: 'nm', text: PEND[k] ? `${PEND[k].nome} · ${fI(PEND[k].raw.length)} linhas` : (CARGAS[k] ? `atual: ${fDT(CARGAS[k].enviado_em)}` : 'sem base') })))); }
+  function slots() { $('#slots').replaceChildren(...['vendas', 'conectadas'].map(k => el('div', { class: 'slot' + (PEND[k] ? ' ok' : '') }, el('b', { text: NOMES[k] }), el('div', { class: 'nm', text: PEND[k] ? `${PEND[k].nome} · ${fI(PEND[k].raw.length)} linhas` : (CARGAS[k] ? `atual: ${fDT(CARGAS[k].enviado_em)}` : 'sem base') })))); }
   $('#btnUpd').addEventListener('click', () => { $('#upPanel').hidden = false; slots(); $('#upPanel').scrollIntoView({ block: 'start' }); });
   $('#btnFechar').addEventListener('click', () => { $('#upPanel').hidden = true; });
   $('#btnEscolher').addEventListener('click', () => $('#fileIn').click());
@@ -737,6 +771,7 @@
         const wb = XLSX.read(await f.arrayBuffer(), { type: 'array', dense: true });
         const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { raw: true, defval: null });
         const tipo = PROC.detect(raw);
+        if (tipo === 'entregas') { upMsg(`"${f.name}" não precisa subir: as entregas de chip saem do relatório de vendas.`, 'err'); continue; }
         if (tipo === 'gross') { upMsg(`"${f.name}" é a base de gross da TIM. Ela entra na próxima etapa do painel.`, 'err'); continue; }
         if (!tipo) { upMsg(`Não reconheci "${f.name}". Confira se é o relatório de vendas, entregas ou conectadas.`, 'err'); continue; }
         PEND[tipo] = { raw, nome: f.name };
