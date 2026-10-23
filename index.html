@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Painel de Portabilidade ATN</title>
+<link rel="icon" type="image/png" href="img/atn.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="css/painel.css">
+</head>
+<body>
+
+<!-- Tela de entrada -->
+<section class="login" id="vLogin" hidden>
+  <div class="card">
+    <div class="brand"><img src="img/atn.png" alt="ATN"><span class="sep"></span><img class="tim" src="img/tim.svg" alt="TIM"></div>
+    <h1 style="text-align:center">Painel de Portabilidade ATN</h1>
+    <form id="fLogin">
+      <label>E-mail<input type="email" id="lEmail" autocomplete="username" required></label>
+      <label>Senha<input type="password" id="lSenha" autocomplete="current-password" required></label>
+      <button class="btn primary" type="submit">Entrar</button>
+      <span class="msg" id="lMsg"></span>
+    </form>
+    <form id="fBoot" hidden>
+      <p class="note">Primeiro acesso: crie o usuário administrador do painel.</p>
+      <label>Nome<input type="text" id="bNome" value="Marcella"></label>
+      <label>E-mail<input type="email" id="bEmail" autocomplete="username" required></label>
+      <label>Senha (mínimo 8 caracteres)<input type="password" id="bSenha" autocomplete="new-password" minlength="8" required></label>
+      <button class="btn primary" type="submit">Criar administrador</button>
+      <span class="msg" id="bMsg"></span>
+    </form>
+  </div>
+</section>
+
+<!-- Painel -->
+<div id="vApp" hidden>
+<header class="top">
+  <div class="wrap">
+    <div class="row1">
+      <div class="brand">
+        <img src="img/atn.png" alt="ATN"><span class="sep"></span><img class="tim" src="img/tim.svg" alt="TIM">
+        <h1>Painel de Portabilidade ATN</h1>
+      </div>
+      <div class="toolbar">
+        <span class="status" id="status">Carregando…</span>
+        <button class="btn primary" id="btnUpd" hidden>Atualizar dados</button>
+        <button class="btn" id="btnUsers" hidden>Usuários</button>
+        <button class="btn" id="btnSenha">Trocar senha</button>
+        <button class="btn" id="btnSair">Sair</button>
+      </div>
+    </div>
+    <div class="filters">
+      <label class="f" for="fMes">Mês<select id="fMes"><option value="">Todos</option></select></label>
+      <label class="f">Empresa
+        <span class="seg" id="fEmp" role="group" aria-label="Empresa">
+          <button type="button" data-v="" aria-pressed="true">ATN + DAHA</button><button type="button" data-v="ATN" aria-pressed="false">ATN</button><button type="button" data-v="DAHA" aria-pressed="false">DAHA</button>
+        </span>
+      </label>
+      <label class="f" for="fEq">Equipe<select id="fEq"><option value="">Todas</option></select></label>
+      <label class="f" for="fUf">UF<select id="fUf"><option value="">Todas</option></select></label>
+      <label class="f" for="fIni">De<input type="date" id="fIni"></label>
+      <label class="f" for="fFim">Até<input type="date" id="fFim"></label>
+      <button class="btn" id="btnLimpar" type="button">Limpar filtros</button>
+    </div>
+    <nav class="tabs" role="tablist" id="tabs">
+      <button class="tab" role="tab" data-t="geral" aria-selected="true">Visão geral</button>
+      <button class="tab" role="tab" data-t="tratativa" aria-selected="false">Controle de tratativa</button>
+      <button class="tab" role="tab" data-t="port" aria-selected="false">Portabilidade</button>
+      <button class="tab" role="tab" data-t="entrega" aria-selected="false">Entrega e insucesso</button>
+      <button class="tab" role="tab" data-t="vendas" aria-selected="false">Vendas e backoffice</button>
+      <button class="tab" role="tab" data-t="conect" aria-selected="false">Conectadas</button>
+      <button class="tab" role="tab" data-t="melhoria" aria-selected="false">Pontos de melhoria</button>
+    </nav>
+  </div>
+</header>
+<main>
+  <div class="wrap">
+    <section class="upload" id="upPanel" hidden>
+      <div class="row1">
+        <h2 class="sec-title" style="margin:0">Atualizar dados</h2>
+        <button class="btn" id="btnFechar" type="button">Fechar</button>
+      </div>
+      <p class="note">Arraste os relatórios aqui ou clique em Escolher arquivos. Pode subir só o que mudou: o relatório de <b>vendas</b> de hora em hora e <b>entregas</b> e <b>conectadas</b> uma vez por dia. O painel reconhece cada arquivo pelo cabeçalho. A leitura acontece no seu navegador e só os campos de análise sobem: nome, CPF, telefone e endereço dos clientes ficam de fora.</p>
+      <div class="toolbar">
+        <input type="file" id="fileIn" multiple accept=".xls,.xlsx,.csv" hidden>
+        <button class="btn" id="btnEscolher" type="button">Escolher arquivos</button>
+        <button class="btn primary" id="btnPublicar" type="button" disabled>Publicar</button>
+        <span class="msg" id="upMsg"></span>
+      </div>
+      <div class="slots" id="slots"></div>
+    </section>
+    <div id="content"><div class="empty"><strong>Carregando…</strong></div></div>
+  </div>
+</main>
+</div>
+
+<input type="file" id="pickIn" accept=".xls,.xlsx" hidden>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/proc.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
