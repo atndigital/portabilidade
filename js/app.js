@@ -272,7 +272,7 @@
     root.append(tl);
     const keys = [...empsShown(), ...(empsShown().length > 1 ? ['Total'] : [])];
     const rowsDef = [['Vendas', 'vendas'], ['Aprovadas', 'aprov', 'vendas', '% das vendas'], ['Rejeitadas', 'rej', 'vendas', '% das vendas'], ['Canceladas', 'canc', 'vendas', '% das vendas'],
-      ['Enviadas para entrega', 'env', 'aprov', '% das aprovadas'], ['Entregues', 'ent', 'env', '% das enviadas'], ['Insucesso de entrega', 'ins', 'env', '% das enviadas'],
+      ['Enviadas para entrega', 'env', 'vendas', '% das vendas'], ['Entregues', 'ent', 'env', '% das enviadas'], ['Insucesso de entrega', 'ins', 'env', '% das enviadas'],
       ['Conectadas (chip em mãos)', 'con', 'aprov', '% das aprovadas'], ['Portabilidade concluída (entre as conectadas)', 'pcc', 'con', '% das conectadas'], ['Portabilidade concluída (entre as aprovadas)', 'pc', 'aprov', '% das aprovadas'],
       ['Portabilidade pendente', 'pp', 'aprov', '% das aprovadas'], ['Portabilidade não concluída', 'pn', 'aprov', '% das aprovadas']];
     const cols = [{ t: 'Etapa', k: 'et', l: true }, ...keys.flatMap(e => [{ t: e, k: e + 'n', f: fI }, { t: '%', k: e + 'p', f: fP }]), { t: 'Base do %', k: 'base', l: true }];
