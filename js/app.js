@@ -31,7 +31,8 @@
   function baixar(nome, blob) { const a = el('a', { href: URL.createObjectURL(blob), download: nome }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
 
   /* ================= estado ================= */
-  let ME = null, PAPEL = null, RAW = { V: null, E: null, C: null }, CARGAS = {}, REF_E = null, HOJE = null;
+  const CHAVE = { vendas: 'V', conectadas: 'C', gross_atn: 'GA', gross_daha: 'GD' };
+  let ME = null, PAPEL = null, RAW = { V: null, E: null, C: null, GA: null, GD: null, G: null }, CARGAS = {}, REF_E = null, HOJE = null;
   const F = { mes: '', emp: '', eq: '', uf: '', ini: '', fim: '' };
   let TAB = (location.hash || '').slice(1) || 'geral';
   const charts = [];
@@ -107,9 +108,9 @@
     if (error) { if (!silencioso) $('#content').replaceChildren(el('div', { class: 'empty' }, el('strong', { text: 'Não foi possível abrir a base' }), el('span', { text: error.message }))); return; }
     const ult = {}; for (const c of data) if (!ult[c.tipo]) ult[c.tipo] = c;
     let mudou = false;
-    for (const tipo of ['vendas', 'conectadas']) {
+    for (const tipo of Object.keys(CHAVE)) {
       const c = ult[tipo]; if (!c) continue;
-      if (CARGAS[tipo] && CARGAS[tipo].id === c.id && RAW[tipo[0].toUpperCase()]) continue;
+      if (CARGAS[tipo] && CARGAS[tipo].id === c.id && RAW[CHAVE[tipo]]) continue;
       let base = null; const cache = await IDB.get(tipo);
       if (cache && cache.id === c.id) base = cache.base;
       else {
@@ -118,7 +119,7 @@
         base = JSON.parse(await gunzipText(dl.data));
         IDB.set(tipo, { id: c.id, base });
       }
-      CARGAS[tipo] = c; RAW[tipo[0].toUpperCase()] = PROC.decode(base.t); mudou = true;
+      CARGAS[tipo] = c; RAW[CHAVE[tipo]] = PROC.decode(base.t); mudou = true;
     }
     if (!mudou && silencioso) return;
     prepare(); setStatus();
@@ -128,6 +129,7 @@
   function prepare() {
     const vmap = new Map(); (RAW.V || []).forEach(r => r.p && vmap.set(r.p, r));
     HOJE = dn(isoLocal(new Date()));
+    RAW.G = (RAW.GA || RAW.GD) ? [...(RAW.GA || []), ...(RAW.GD || [])] : null;
     // Entregas de chip: montadas a partir do relatório de vendas (pedido entregue; data da entrega = data do status Bluechip)
     RAW.E = RAW.V ? RAW.V.filter(r => r.bg === 'Entregue' && r.dbs).map(r => ({ p: r.p, dv: r.dv, de: r.dbs, emp: r.emp, eq: r.eq, ace: !!r.aceOp, pos: r.pos, pt: r.pt, pm: r.pm, pd: r.pd, fl: r.fl, sms: r.sms, so: r.so, pa: r.pa, chip: r.chip })) : null;
     if (RAW.E && RAW.E.length) { let mx = 0; for (const r of RAW.E) { mx = Math.max(mx, dn(r.de)); const v = vmap.get(r.p); r.uf = v ? v.uf : null; } REF_E = mx + 1; for (const r of RAW.E) { r.obs = REF_E - dn(r.de); r.lag = r.pd ? dn(r.pd) - dn(r.de) : null; } }
@@ -136,7 +138,7 @@
   }
   function setStatus() {
     const s = $('#status'); s.replaceChildren();
-    const parts = [['vendas', 'Vendas e entregas'], ['conectadas', 'Conectadas']].filter(([t]) => CARGAS[t]);
+    const parts = [['vendas', 'Vendas e entregas'], ['conectadas', 'Conectadas'], ['gross_atn', 'Gross ATN'], ['gross_daha', 'Gross DAHA']].filter(([t]) => CARGAS[t]);
     if (!parts.length) { s.textContent = 'Nenhuma base carregada'; return; }
     parts.forEach(([t, n], i) => { if (i) s.append(' · '); s.append(n + ': ', el('b', { text: fDT(CARGAS[t].enviado_em) })); });
   }
@@ -750,44 +752,55 @@
   const diaSem = iso => new Date(dn(iso) * 864e5).getUTCDay();
   const util = iso => { const w = diaSem(iso); return w >= 1 && w <= 5 && !FERIADOS.has(iso); };
   function rGross(root) {
-    if (!RAW.V) return semBase('vendas', root);
-    if (!RAW.V.some(r => 'dg' in r)) { root.append(el('div', { class: 'empty' }, el('strong', { text: 'Suba o relatório de vendas de novo' }), el('span', { text: 'A base atual foi publicada antes da aba de gross existir. No próximo upload de vendas os números aparecem aqui.' }))); return; }
-    const base = RAW.V.filter(r => r.dg && (!F.emp || r.emp === F.emp) && (!F.eq || r.eq === F.eq) && (!F.uf || r.uf === F.uf));
-    const ultimo = base.reduce((m, r) => r.dg > m ? r.dg : m, '');
-    if (!ultimo) { root.append(el('p', { class: 'note', text: 'Nenhuma venda marcada como gross no filtro atual.' })); return; }
-    const mes = F.mes || ultimo.slice(0, 7);
-    const G = base.filter(r => r.dg.slice(0, 7) === mes);
+    if (!RAW.G) { root.append(el('div', { class: 'empty' }, el('strong', { text: 'Ainda não há base de gross' }), el('span', { text: podeEditar() ? 'Clique em Atualizar dados e envie os arquivos de gross da TIM (GROSS_OUTBOUND), um da ATN e um da DAHA.' : 'Assim que um editor enviar a base de gross da TIM, os números aparecem aqui.' }))); return; }
+    const ultimoGeral = RAW.G.reduce((m, r) => r.dt > m ? r.dt : m, '');
+    const mes = F.mes || ultimoGeral.slice(0, 7);
     const fimMes = nd(dn(mes + '-01') + new Date(Date.UTC(+mes.slice(0, 4), +mes.slice(5, 7), 0)).getUTCDate() - 1);
-    const corte = ultimo.slice(0, 7) === mes ? ultimo : fimMes; // último dia com gross no mês
     const dias = []; for (let d = dn(mes + '-01'); d <= dn(fimMes); d++) dias.push(nd(d));
-    const decorridos = dias.filter(d => d <= corte && util(d)).length, restantes = dias.filter(d => d > corte && util(d)).length;
-    const ems = [...empsShown(), ...(empsShown().length > 1 ? ['Total'] : [])];
-    const de = e => e === 'Total' ? G : G.filter(r => r.emp === e);
-    const real = e => de(e).length, media = e => decorridos ? real(e) / decorridos : null, proj = e => real(e) + (media(e) || 0) * restantes;
-    root.append(el('p', { class: 'lead', text: `Gross pela data de marcação ("Marcado Gross" do relatório de vendas), ${mesNome(mes)}. Realizado até ${fD(corte)}. A projeção soma ao realizado a média por dia útil vezes os dias úteis que faltam até ${fD(fimMes)}. Dia útil = segunda a sexta, sem feriados nacionais. A base oficial de gross da TIM entra na próxima etapa.` }));
+    const emps = empsShown();
+    const G = RAW.G.filter(r => r.dt.slice(0, 7) === mes && emps.includes(r.emp));
+    // cada empresa tem o seu arquivo: o corte é o último dia que veio no arquivo dela
+    const M = {};
+    for (const e of emps) {
+      const a = G.filter(r => r.emp === e); const ult = a.reduce((m, r) => r.dt > m ? r.dt : m, '');
+      const corte = ult ? (ult.slice(0, 7) === mes && mes === ultimoGeral.slice(0, 7) ? ult : fimMes) : null;
+      const dec = corte ? dias.filter(d => d <= corte && util(d)).length : 0, rest = corte ? dias.filter(d => d > corte && util(d)).length : 0;
+      const real = a.length, media = dec ? real / dec : null;
+      M[e] = { a, corte, dec, rest, real, media, proj: real + (media || 0) * rest, prev: count(a, r => r.prev && r.dt === ult), ult };
+    }
+    const faltando = emps.filter(e => !M[e].a.length);
+    const ems = [...emps, ...(emps.length > 1 ? ['Total'] : [])];
+    const val = (e, k) => e === 'Total' ? emps.reduce((s, x) => s + (M[x][k] || 0), 0) : M[e][k];
+    root.append(el('p', { class: 'lead', text: `Gross oficial da TIM (arquivos GROSS_OUTBOUND de ATN e DAHA), ${mesNome(mes)}, pela data do gross. A projeção soma ao realizado a média por dia útil vezes os dias úteis que faltam até ${fD(fimMes)}. Dia útil = segunda a sexta, sem feriados nacionais; os dias úteis entram só no cálculo da projeção.` }));
+    if (faltando.length) root.append(el('p', { class: 'msg err', text: `Sem base de gross de ${faltando.join(' e ')} para ${mesNome(mes)}.` }));
     const tl = el('div', { class: 'tiles' });
-    const tile = (k, fn, hl) => el('div', { class: 'tile' + (hl ? ' hl' : '') }, el('span', { class: 'k', text: k }), el('div', { class: 'pair' }, ems.map(e => el('div', { class: 'emp' }, el('span', { class: 'v c-' + e.toLowerCase() }, fn(e), el('small', { text: e }))))));
-    tl.append(tile(`Gross realizado até ${fD(corte)}`, e => fI(real(e))));
-    tl.append(tile('Média por dia útil', e => fI(media(e))));
-    tl.append(tile(`Projeção até ${fD(fimMes)}`, e => fI(Math.round(proj(e))), true));
-    tl.append(el('div', { class: 'tile' }, el('span', { class: 'k', text: 'Dias úteis no mês' }), el('div', { class: 'pair' }, el('div', { class: 'emp' }, el('span', { class: 'v' }, String(decorridos), el('small', { text: 'decorridos' }))), el('div', { class: 'emp' }, el('span', { class: 'v' }, String(restantes), el('small', { text: 'restantes' }))))));
+    const tile = (k, fn, hl) => el('div', { class: 'tile' + (hl ? ' hl' : '') }, el('span', { class: 'k', text: k }), el('div', { class: 'pair' }, ems.map(e => el('div', { class: 'emp' }, el('span', { class: 'v c-' + e.toLowerCase() }, fn(e), el('small', { text: e })), e !== 'Total' && M[e].corte ? el('span', { class: 'sub', text: `até ${fD(M[e].corte)}` }) : null))));
+    tl.append(tile('Gross realizado no mês', e => fI(val(e, 'real'))));
+    tl.append(tile('Média por dia útil', e => fI(e === 'Total' ? val(e, 'media') : M[e].media)));
+    tl.append(tile(`Projeção até ${fD(fimMes)}`, e => fI(Math.round(val(e, 'proj'))), true));
+    tl.append(tile('Dias úteis decorridos / restantes', e => e === 'Total' ? '–' : `${M[e].dec} / ${M[e].rest}`));
     root.append(tl);
-    const g = groupBy(G, r => r.dg);
+    const prevs = emps.filter(e => M[e].prev);
+    if (prevs.length) root.append(el('p', { class: 'note', text: 'Prévia: ' + prevs.map(e => `${e} ${fD(M[e].ult)} com ${fI(M[e].prev)} gross ainda sem contrato no arquivo da TIM`).join(' · ') + '. O número desse dia ainda pode mudar.' }));
+    const g = groupBy(G, r => r.dt);
     const porDia = (d, e) => (g.get(d) || []).filter(r => e === 'Total' || r.emp === e).length;
+    const corteMax = emps.map(e => M[e].corte).filter(Boolean).sort().pop() || fimMes;
+    const lab = d => util(d) ? fD(d) : `(${fD(d)})`;
     const [b1, c1] = box(true), [b2, c2] = box(true);
     root.append(el('div', { class: 'grid' }, card('Gross dia a dia', 'Dias não úteis aparecem com o rótulo entre parênteses.', b1), card('Acumulado e projeção até o fim do mês', 'Linha cheia: realizado. Tracejada: projeção pela média por dia útil.', b2)));
-    const lab = d => util(d) ? fD(d) : `(${fD(d)})`;
-    chart(c1, { type: 'bar', data: { labels: dias.filter(d => d <= corte).map(lab), datasets: empsShown().map(e => ({ label: e, data: dias.filter(d => d <= corte).map(d => porDia(d, e)), backgroundColor: colEmp(e), borderRadius: 3, maxBarThickness: 22 })) }, options: { scales: { y: { beginAtZero: true, stacked: true }, x: { stacked: true } } } });
+    const diasReal = dias.filter(d => d <= corteMax);
+    chart(c1, { type: 'bar', data: { labels: diasReal.map(lab), datasets: emps.map(e => ({ label: e, data: diasReal.map(d => porDia(d, e)), backgroundColor: colEmp(e), borderRadius: 3, maxBarThickness: 22 })) }, options: { scales: { y: { beginAtZero: true, stacked: true }, x: { stacked: true } } } });
     const ds = [];
-    empsShown().forEach(e => {
-      let ac = 0; const realL = dias.map(d => { if (d > corte) return null; ac += porDia(d, e); return ac; });
-      let pj = real(e); const projL = dias.map(d => { if (d < corte) return null; if (d === corte) return pj; if (util(d)) pj += media(e) || 0; return Math.round(pj); });
+    emps.forEach(e => {
+      if (!M[e].corte) return;
+      let ac = 0; const realL = dias.map(d => { if (d > M[e].corte) return null; ac += porDia(d, e); return ac; });
+      let pj = M[e].real; const projL = dias.map(d => { if (d < M[e].corte) return null; if (d === M[e].corte) return pj; if (util(d)) pj += M[e].media || 0; return Math.round(pj); });
       ds.push({ label: e + ' realizado', data: realL, borderColor: colEmp(e), backgroundColor: colEmp(e), borderWidth: 2, pointRadius: 0 });
       ds.push({ label: e + ' projeção', data: projL, borderColor: colEmp(e), backgroundColor: colEmp(e), borderWidth: 2, pointRadius: 0, borderDash: [6, 4] });
     });
     chart(c2, { type: 'line', data: { labels: dias.map(lab), datasets: ds }, options: { scales: { y: { beginAtZero: true }, x: { ticks: { maxRotation: 0, autoSkip: true } } } } });
     const acc = {}; ems.forEach(e => acc[e] = 0);
-    const rows = dias.filter(d => d <= corte).map(d => { const o = { d: fD(d), ds: DSEM[diaSem(d)], u: util(d) ? 'Sim' : 'Não' }; ems.forEach(e => { o[e] = porDia(d, e); acc[e] += o[e]; o[e + 'a'] = acc[e]; }); return o; });
+    const rows = diasReal.map(d => { const o = { d: fD(d), ds: DSEM[diaSem(d)], u: util(d) ? 'Sim' : 'Não' }; ems.forEach(e => { o[e] = porDia(d, e); acc[e] += o[e]; o[e + 'a'] = acc[e]; }); return o; });
     const cols = [{ t: 'Data', k: 'd', l: true }, { t: 'Dia', k: 'ds', l: true }, { t: 'Dia útil', k: 'u', l: true }, ...ems.flatMap(e => [{ t: e, k: e, f: fI }, { t: e + ' acumulado', k: e + 'a', f: fI }])];
     root.append(card('Tabela dia a dia', null, table(cols, rows, { maxh: '520px' })));
   }
@@ -833,8 +846,8 @@
 
   /* ================= upload ================= */
   const PEND = {};
-  const NOMES = { vendas: 'Vendas', entregas: 'Entregas de chip', conectadas: 'Conectadas', gross: 'Gross TIM' };
-  function slots() { $('#slots').replaceChildren(...['vendas', 'conectadas'].map(k => el('div', { class: 'slot' + (PEND[k] ? ' ok' : '') }, el('b', { text: NOMES[k] }), el('div', { class: 'nm', text: PEND[k] ? `${PEND[k].nome} · ${fI(PEND[k].raw.length)} linhas` : (CARGAS[k] ? `atual: ${fDT(CARGAS[k].enviado_em)}` : 'sem base') })))); }
+  const NOMES = { vendas: 'Vendas', conectadas: 'Conectadas', gross_atn: 'Gross TIM · ATN', gross_daha: 'Gross TIM · DAHA' };
+  function slots() { $('#slots').replaceChildren(...['vendas', 'conectadas', 'gross_atn', 'gross_daha'].map(k => el('div', { class: 'slot' + (PEND[k] ? ' ok' : '') }, el('b', { text: NOMES[k] }), el('div', { class: 'nm', text: PEND[k] ? `${PEND[k].nome} · ${fI(PEND[k].raw.length)} linhas` : (CARGAS[k] ? `atual: ${fDT(CARGAS[k].enviado_em)}` : 'sem base') })))); }
   $('#btnUpd').addEventListener('click', () => { $('#upPanel').hidden = false; slots(); $('#upPanel').scrollIntoView({ block: 'start' }); });
   $('#btnFechar').addEventListener('click', () => { $('#upPanel').hidden = true; });
   $('#btnEscolher').addEventListener('click', () => $('#fileIn').click());
@@ -852,7 +865,7 @@
         const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { raw: true, defval: null });
         const tipo = PROC.detect(raw);
         if (tipo === 'entregas') { upMsg(`"${f.name}" não precisa subir: as entregas de chip saem do relatório de vendas.`, 'err'); continue; }
-        if (tipo === 'gross') { upMsg(`"${f.name}" é a base de gross da TIM. Ela entra na próxima etapa do painel.`, 'err'); continue; }
+        if (tipo === 'gross') { const k = 'gross_' + PROC.empresaGross(raw).toLowerCase(); PEND[k] = { raw, nome: f.name }; continue; }
         if (!tipo) { upMsg(`Não reconheci "${f.name}". Confira se é o relatório de vendas, entregas ou conectadas.`, 'err'); continue; }
         PEND[tipo] = { raw, nome: f.name };
         if (tipo === 'vendas') ARQ = f;
@@ -867,7 +880,13 @@
     try {
       for (const tipo of Object.keys(PEND)) {
         upMsg(`Processando ${NOMES[tipo]}…`); await new Promise(r => setTimeout(r, 20));
-        const base = PROC.build(tipo, PEND[tipo].raw);
+        let base;
+        if (tipo.startsWith('gross_')) {
+          // o arquivo da TIM traz só o mês corrente: guarda os meses anteriores que já estavam na base
+          const novos = PROC.procGross(PEND[tipo].raw); const meses = new Set(novos.map(r => r.dt.slice(0, 7)));
+          const antigos = (RAW[CHAVE[tipo]] || []).filter(r => !meses.has(r.dt.slice(0, 7)));
+          base = { versao: 2, tipo, t: PROC.encode([...antigos, ...novos], PROC.COLS.gross) };
+        } else base = PROC.build(tipo, PEND[tipo].raw);
         const blob = await gzip(JSON.stringify(base));
         const path = `cargas/${tipo}/${Date.now()}.json.gz`;
         upMsg(`Enviando ${NOMES[tipo]}…`);

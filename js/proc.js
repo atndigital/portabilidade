@@ -195,6 +195,19 @@
     }).filter(r => r.da);
   }
 
+  function procGross(raw) {
+    return normRows(raw).map(r => {
+      const g = txt(pick(r, ['DS GRUPO ECONOMICO TRATADO', 'DS GRUPO ECONOMICO'])) || '';
+      return {
+        dt: toDay(pick(r, ['DT VENDA'])), emp: /DAHA/i.test(g) ? 'DAHA' : 'ATN',
+        port: Number(pick(r, ['FL PORTABILIDADE'])) === 1, esim: /^SIM$/i.test(txt(pick(r, ['FLAG ESIM'])) || ''),
+        plano: txt(pick(r, ['DS PLANO AGRUPADO ATUAL', 'DS PLANO ATUAL'])), doadora: txt(pick(r, ['DS DOADORA'])), ddd: txt(pick(r, ['NR DDD'])),
+        prev: !txt(pick(r, ['ID SKY CONTRATO']))
+      };
+    }).filter(r => r.dt);
+  }
+  function empresaGross(raw) { const rows = procGross(raw.slice(0, 500)); return rows.filter(r => r.emp === 'DAHA').length > rows.length / 2 ? 'DAHA' : 'ATN'; }
+
   function detect(raw) {
     const h = Object.keys(raw[0] || {}).map(norm);
     if (h.includes('DS DIMENSAO INDICADOR') || h.includes('NR ACESSO')) return 'gross';
@@ -207,11 +220,12 @@
   const COLS = {
     vendas: ['p', 'dv', 'dvt', 'emp', 'eq', 'sup', 'vend', 'uf', 'sv', 'mr', 'fl', 'con', 'dcon', 'bs', 'bg', 'bm', 'dbs', 'sep', 'cd', 'forma', 'dmax', 'qr', 'pt', 'pm', 'pd', 'pa', 'sms', 'aceOp', 'dacet', 'pos', 'so', 'chip', 'os1', 'dg', 'nt', 'abr'],
     entregas: ['p', 'dv', 'de', 'emp', 'eq', 'ace', 'pos', 'pt', 'pm', 'pd', 'fl', 'sms', 'so', 'pa', 'chip'],
-    conectadas: ['p', 'dv', 'da', 'emp', 'eq', 'ace', 'pos', 'pt', 'pm', 'pd', 'fl', 'so', 'chip', 'nt', 'auto']
+    conectadas: ['p', 'dv', 'da', 'emp', 'eq', 'ace', 'pos', 'pt', 'pm', 'pd', 'fl', 'so', 'chip', 'nt', 'auto'],
+    gross: ['dt', 'emp', 'port', 'esim', 'plano', 'doadora', 'ddd', 'prev']
   };
-  const PROC_FN = { vendas: procVendas, entregas: procEntregas, conectadas: procConectadas };
+  const PROC_FN = { vendas: procVendas, entregas: procEntregas, conectadas: procConectadas, gross: procGross };
   function build(tipo, raw) { return { versao: 2, tipo, t: encode(PROC_FN[tipo](raw), COLS[tipo]) }; }
 
-  root.PROC = { norm, txt, toDay, toDT, complemento, bluechip, procVendas, procEntregas, procConectadas, detect, encode, decode, build,
+  root.PROC = { norm, txt, toDay, toDT, complemento, bluechip, procVendas, procEntregas, procConectadas, detect, encode, decode, build, procGross, empresaGross, COLS,
     emRotaStatus, tratativa, entregaCancelada, formaEntrega, normRows, pick };
 })(typeof window !== 'undefined' ? window : globalThis);
