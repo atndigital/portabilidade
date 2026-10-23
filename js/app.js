@@ -338,6 +338,7 @@
   function curva(rows, N) { const b = rows.filter(r => r.obs >= N); return pct(count(b, r => r.pt === 'C' && r.lag != null && r.lag <= N), b.length); }
   function chance(rows, N) { const b = rows.filter(r => r.obs >= N + 7); const open = b.filter(r => !(r.pt === 'C' && r.lag != null && r.lag <= N)); return pct(count(open, r => r.pt === 'C' && r.lag > N), open.length); }
   function rPort(root) {
+    if (RAW.V) reprocessadas(root);
     if (RAW.E) {
       const E = filt(RAW.E, 'de'), be = byEmp(E);
       root.append(el('p', { class: 'lead', text: 'Curvas: entregas de chip (do relatório de vendas), dias da entrega até o portin. Para cada prazo só entram entregas que já tiveram aquele número de dias. Fila de retargeting e mailings: relatório de vendas, atualizado de hora em hora.' }));
@@ -354,7 +355,7 @@
       root.append(el('div', { class: 'grid' }, card('Motivos de não conclusão', '% das não concluídas de cada empresa.', legendEl(), hbars(topItems(E.filter(r => r.pt === 'N'), r => r.pm || 'Sem motivo informado', 12), empsShown(), fP)),
         card('Status da ordem dos pedidos não concluídos ou pendentes', null, legendEl(), hbars(topItems(E.filter(r => r.pt !== 'C'), r => r.so || 'Sem status de ordem', 10), empsShown(), fP))));
     }
-    if (RAW.V) { reprocessadas(root); filaRetargeting(root); } else semBase('vendas', root);
+    if (RAW.V) filaRetargeting(root); else semBase('vendas', root);
     historicoMailings(root);
   }
 
@@ -363,16 +364,17 @@
     const ent = filt(RAW.V.filter(r => r.bg === 'Entregue' && r.dbs), 'dbs');
     const R = ent.filter(r => r.rep);
     R.forEach(r => { r._react = r.dcon ? dn(r.dcon) - dn(r.dbs) : null; });
-    root.append(el('h2', { class: 'sec-title', text: 'Vendas reprocessadas' }),
+    root.append(el('h2', { class: 'sec-title', text: 'Retargeting: vendas reprocessadas' }),
       el('p', { class: 'lead', text: 'Pedidos entregues com a flag "reprocessado aprovisionamento" (nova ativação depois da entrega), pela data da entrega. Segue os filtros do topo. Tempo até a nova ativação = data de conectada menos data da entrega.' }));
     if (!R.length) { root.append(el('p', { class: 'note', text: 'Nenhuma venda reprocessada no filtro atual.' })); return; }
     const bR = byEmp(R), bE = byEmp(ent);
     const tl = el('div', { class: 'tiles' });
     tl.append(tileEmp('Reprocessadas', e => ({ v: fI(bR[e].length), sub: [el('b', { text: fP(pct(bR[e].length, bE[e].length)) }), ' das entregues'] })));
-    tl.append(tileEmp('Portabilidade concluída', e => ({ v: fP(pct(count(bR[e], r => r.pt === 'C'), bR[e].length)), sub: [el('b', { text: fI(count(bR[e], r => r.pt === 'C')) }), ' de ', fI(bR[e].length)] }), true));
+    tl.append(tileEmp('Concluíram a portabilidade', e => ({ v: fI(count(bR[e], r => r.pt === 'C')), sub: [el('b', { text: fP(pct(count(bR[e], r => r.pt === 'C'), bR[e].length)) }), ' das reprocessadas'] }), true));
     tl.append(tileEmp('Pendente', e => ({ v: fP(pct(count(bR[e], r => r.pt === 'P'), bR[e].length)), sub: [el('b', { text: fI(count(bR[e], r => r.pt === 'P')) }), ' pedidos'] })));
     tl.append(tileEmp('Não concluída', e => ({ v: fP(pct(count(bR[e], r => r.pt === 'N'), bR[e].length)), sub: [el('b', { text: fI(count(bR[e], r => r.pt === 'N')) }), ' pedidos'] })));
-    tl.append(tileEmp('Mediana até a nova ativação', e => ({ v: fI(median(bR[e].filter(r => r._react != null).map(r => r._react))), sub: 'dias após a entrega' })));
+    const media = a => { const d = a.filter(r => r._react != null && r._react >= 0).map(r => r._react); return d.length ? d.reduce((x, y) => x + y, 0) / d.length : null; };
+    tl.append(tileEmp('Média de dias da entrega ao reprocessamento', e => ({ v: fI(media(bR[e])), sub: ['mediana: ', el('b', { text: fI(median(bR[e].filter(r => r._react != null && r._react >= 0).map(r => r._react))) }), ' dias'] }), true));
     root.append(tl);
     const faixas = [['Até 3 dias', d => d != null && d <= 3], ['4 a 7 dias', d => d >= 4 && d <= 7], ['8 a 15 dias', d => d >= 8 && d <= 15], ['Mais de 15 dias', d => d > 15], ['Sem data de nova ativação', d => d == null]];
     const tf = faixas.map(([k, f]) => { const o = { k }; empsShown().forEach(e => { const a = bR[e].filter(r => f(r._react)); o[e + 'n'] = a.length; o[e + 'c'] = count(a, r => r.pt === 'C'); o[e + 'p'] = a.length ? pct(o[e + 'c'], a.length) : null; }); return o; });
