@@ -292,10 +292,7 @@
     if (!RAW.E) return semBase('vendas', root);
     const E = filt(RAW.E, 'de');
     const corte = corteAtual();
-    const bExp = el('button', { class: 'btn', hidden: !podeEditar() }, 'Exportar Entregas de chip'), mExp = el('span', { class: 'msg' });
-    bExp.addEventListener('click', () => exportarEntregas(mExp));
-    root.append(el('p', { class: 'lead', text: 'Entregas de chip montadas a partir do relatório de vendas: pedidos com status "Pedido Entregue" na Bluechip, pela data desse status. Contato efetivo = pedido com pós-venda registrado. SMS respondido = pedido com aceite de voz registrado.' }),
-      el('div', { class: 'toolbar' }, bExp, mExp, el('span', { class: 'note', text: 'A exportação segue os filtros de mês, período, empresa e equipe.' })));
+    root.append(el('p', { class: 'lead', text: 'Entregas de chip montadas a partir do relatório de vendas: pedidos com status "Pedido Entregue" na Bluechip, pela data desse status. Contato efetivo = pedido com pós-venda registrado. SMS respondido = pedido com aceite de voz registrado.' }));
     const be = byEmp(E);
     const tl = el('div', { class: 'tiles' });
     tl.append(tileEmp('Contato efetivo', e => ({ v: fP(pct(count(be[e], r => r.pos), be[e].length)), sub: [el('b', { text: fI(count(be[e], r => r.pos)) }), ` de ${fI(be[e].length)} entregas`] }), true));
@@ -397,7 +394,7 @@
     const bCsv = el('button', { class: 'btn' }, 'Baixar lista (CSV)'), bMail = el('button', { class: 'btn primary', hidden: !podeEditar() }, 'Gerar mailing para o discador');
     const msg = el('span', { class: 'msg' });
     card0.append(el('h2', { text: 'Fila de retargeting' }), el('p', { class: 'note', text: 'Pedidos entregues com portabilidade não concluída, pelo relatório de vendas mais recente. Ignora os filtros de mês e período do topo; usa empresa, equipe e UF. Os filtros abaixo ficam guardados no seu navegador.' }),
-      fbox, el('div', { class: 'toolbar' }, contador, bCsv, bMail, msg), holder);
+      fbox, el('div', { class: 'toolbar' }, contador, bCsv, bMail, podeEditar() ? arqInfo(msg) : null, msg), holder);
     let lista = [];
     function aplica() {
       return baseAll.filter(r => {
@@ -431,6 +428,18 @@
   }
 
   /* ================= leitura do relatório local (para arquivos com dados de cliente) ================= */
+  // Relatório de vendas usado nas exportações: escolhido uma vez por sessão (ou o mesmo que foi enviado no upload)
+  let ARQ = null;
+  async function arquivoVendas(msg, trocar) {
+    if (ARQ && !trocar) { msg.className = 'msg'; msg.textContent = `Usando ${ARQ.name}…`; return ARQ; }
+    msg.className = 'msg'; msg.textContent = 'Escolha o relatório de vendas…';
+    const f = await escolherArquivo(); if (!f) { msg.textContent = ''; return null; }
+    ARQ = f; document.querySelectorAll('.arq-nome').forEach(x => x.textContent = f.name); return f;
+  }
+  function arqInfo(msg) {
+    return el('span', { class: 'note' }, 'Relatório de vendas para exportar: ', el('b', { class: 'arq-nome', text: ARQ ? ARQ.name : 'pedido no primeiro clique' }), ' ',
+      el('button', { class: 'btn small', onclick: () => arquivoVendas(msg, true).then(f => { if (f) { msg.className = 'msg ok'; msg.textContent = 'Arquivo trocado.'; } }) }, 'Trocar arquivo'));
+  }
   function escolherArquivo() {
     return new Promise(res => { const i = $('#pickIn'); i.value = ''; i.onchange = () => res(i.files[0] || null); i.oncancel = () => res(null); i.click(); });
   }
@@ -449,12 +458,11 @@
     return rows.map(r => { const tp = soDig(r[iT]); const nl = soDig(r[iL]); return [soDig(r[iP]), tp, nomeMailing(r[iN]), nl || tp].join(';'); });
   }
   async function pedirVendas(msg) {
-    msg.className = 'msg'; msg.textContent = 'Escolha o relatório de vendas do dia…';
-    const f = await escolherArquivo(); if (!f) { msg.textContent = ''; return null; }
+    const f = await arquivoVendas(msg); if (!f) return null;
     msg.textContent = 'Lendo ' + f.name + '…';
     const t = await lerPlanilha(f);
     const tipo = PROC.detect(Object.fromEntries(t.head.map(h => [h, 1])) && [Object.fromEntries(t.head.map(h => [h, 1]))]);
-    if (tipo !== 'vendas') { msg.className = 'msg err'; msg.textContent = `"${f.name}" não é o relatório de vendas.`; return null; }
+    if (tipo !== 'vendas') { ARQ = null; msg.className = 'msg err'; msg.textContent = `"${f.name}" não é o relatório de vendas.`; return null; }
     return { f, ...t };
   }
   async function gerarMailing(tipo, props, opts) {
@@ -509,8 +517,8 @@
     const bExp = el('button', { class: 'btn primary', hidden: !podeEditar() }, 'Exportar planilha Rota'); const msg = el('span', { class: 'msg' });
     const nomeRota = () => `Rota ${F.emp || 'Total'} ${pad(new Date().getDate())}-${pad(new Date().getMonth() + 1)}.xlsx`;
     root.append(el('h2', { class: 'sec-title', text: 'Em rota hoje' }),
-      el('p', { class: 'lead', text: `Vendas aprovadas, ainda não conectadas, com status de rota na Bluechip: ${fI(base.length)} pedidos (${EMPS.map(e => e + ' ' + fI(count(base, r => r.emp === e))).join(' · ')}). Clique em um número para ver os pedidos. A exportação traz as abas Tratativa ATN, Cobrar atraso e Finalizadas (${fI(fin.length)} com entrega cancelada).` }),
-      el('div', { class: 'toolbar' }, bExp, msg));
+      el('p', { class: 'lead', text: `Vendas aprovadas, ainda não conectadas, com status de rota na Bluechip: ${fI(base.length)} pedidos (${EMPS.map(e => e + ' ' + fI(count(base, r => r.emp === e))).join(' · ')}). Clique em um número para ver os pedidos. A exportação sai no mesmo formato da planilha Rota: as três tabelas de resumo, a base Propostas diarias com as colunas Tratativa, Data Maxima, Dias em atraso e Forma de Entrega, e a aba CANCELADA (${fI(fin.length)} pedidos).` }),
+      el('div', { class: 'toolbar' }, bExp, podeEditar() ? arqInfo(msg) : null, msg));
     function mostra(titulo, rows) {
       hold.replaceChildren(card(`${titulo}: ${fI(rows.length)} pedidos`, null, table([{ t: 'Proposta', k: 'p', l: true }, { t: 'Empresa', k: 'emp', l: true, render: v => empPill(v) }, { t: 'Equipe', k: 'eq', l: true }, { t: 'Status Bluechip', k: 'bs', l: true }, { t: 'Tratativa', k: '_trat', l: true },
         { t: 'Forma de entrega', k: 'forma', l: true }, { t: 'Data máxima', k: 'dmax', f: fD }, { t: 'Dias em atraso', k: '_dias', f: fI }], rows, { sortable: true, sortKey: '_dias', maxh: '380px' })));
@@ -546,52 +554,23 @@
       card('Data máxima prevista × forma de entrega', 'Vermelho: com atraso. Verde: em dia. Quanto mais forte a cor, mais pedidos.', t4), hold);
     bExp.addEventListener('click', () => exportarRota(msg, nomeRota()));
   }
-  // Exporta "Entregas de chip" no layout que a equipe usa, a partir do relatório de vendas
-  async function exportarEntregas(msg) {
-    msg.className = 'msg'; msg.textContent = 'Escolha o relatório de vendas do dia…';
-    const f = await escolherArquivo(); if (!f) { msg.textContent = ''; return; }
-    msg.textContent = 'Montando a planilha…';
-    const { head, rows } = await lerCelulas(f);
-    const I = (...n) => idx(head, ...n);
-    const iBS = I('Bluechip Status'), iBD = I('Bluechip Data Status'), iPl = I('Plataforma'), iEq = I('Nome Equipe');
-    if (iBS < 0 || iBD < 0) { msg.className = 'msg err'; msg.textContent = `"${f.name}" não é o relatório de vendas.`; return; }
-    const MAPA = [['DATA_VENDA', 'Data venda'], ['DATA_ENTREGA', 'Bluechip Data Status'], ['CPF', 'CPF'], ['NOME', 'Cliente'], ['TELEFONE_PORTADO', 'Telefone Portabilidade'], ['NUMERO_LINHA', 'Numero linha'],
-      ['VENDEDOR', 'Nome vendedor'], ['EQUIPE', 'Nome Equipe'], ['ACEITE DE VOZ', 'Aceite de Voz'], ['DATA ACEITE VOZ', 'Data aceite voz'], ['POS VENDA', 'Pos venda'], ['DATA POS VENDA', 'Data pos venda'],
-      ['PORTABILIDADE', 'Portabilidade'], ['COMPLEMENTO PORTABILIDADE', 'Complemento Portabilidade'], ['PLATAFORMA CONECTADA', 'Plataforma'], ['PROPOSTA', 'Proposta iSize'], ['FLAG', 'Flag'],
-      ['NUMERO OS', 'Numero OS'], ['SMS PREVIO', 'SMS Previo'], ['STATUS DA ORDEM', 'Status Ordem'], ['PORT ANTECIPADA', 'Portabilidade Antecipada'], ['TIPO CHIP', 'Tipo Chip']].map(([o, s]) => [o, idx(head, s)]);
-    const v = (r, i) => i < 0 || !r[i] ? null : r[i].v;
-    const emp = r => { const p = String(v(r, iPl) || '').trim().toUpperCase(); return p === 'ATN' || p === 'DAHA' ? p : /^DAHA/i.test(String(v(r, iEq) || '')) ? 'DAHA' : 'ATN'; };
-    const sel = rows.filter(r => {
-      if (PROC.bluechip(v(r, iBS))[0] !== 'Entregue') return false;
-      const d = PROC.toDay(v(r, iBD)); if (!d) return false;
-      if (F.mes && d.slice(0, 7) !== F.mes) return false; if (F.ini && d < F.ini) return false; if (F.fim && d > F.fim) return false;
-      if (F.emp && emp(r) !== F.emp) return false; if (F.eq && String(v(r, iEq) || '').trim() !== F.eq) return false;
-      return true;
-    }).sort((a, b) => String(PROC.toDT(v(a, iBD))).localeCompare(String(PROC.toDT(v(b, iBD)))));
-    const S = x => ({ t: 's', v: x });
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([MAPA.map(m => S(m[0])), ...sel.map(r => MAPA.map(([, i]) => i < 0 ? null : r[i]))]), 'Propostas diarias');
-    const hoje = new Date(); const nome = `ENTREGAS_DE_CHIP_${pad(hoje.getDate())}${pad(hoje.getMonth() + 1)}.xlsx`;
-    XLSX.writeFile(wb, nome);
-    msg.className = 'msg ok'; msg.textContent = `${nome}: ${fI(sel.length)} entregas.`;
-  }
   // Lê a planilha mantendo cada célula como no original (datas com o mesmo formato)
   async function lerCelulas(file) {
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', dense: true, cellNF: true });
     const ws = wb.Sheets[wb.SheetNames[0]];
     const linhas = []; const rng = XLSX.utils.decode_range(ws['!ref'] || 'A1');
     for (let R = 0; R <= rng.e.r; R++) { const row = ws[R] || []; const out = []; for (let C = 0; C <= rng.e.c; C++) { const c = row[C]; out.push(c && c.v != null && c.v !== '' ? { t: c.t, v: c.v, z: c.z } : null); } linhas.push(out); }
-    const head = (linhas[0] || []).map(c => c ? String(c.v) : '');
-    return { head, rows: linhas.slice(1).filter(r => r.some(Boolean)) };
+    let head = (linhas[0] || []).map(c => c ? String(c.v) : '');
+    let n = head.length; while (n > 0 && !head[n - 1]) n--; head = head.slice(0, n);
+    return { head, rows: linhas.slice(1).map(r => r.slice(0, n)).filter(r => r.some(Boolean)) };
   }
   async function exportarRota(msg, nome) {
-    msg.className = 'msg'; msg.textContent = 'Escolha o relatório de vendas do dia…';
-    const f = await escolherArquivo(); if (!f) { msg.textContent = ''; return; }
+    const f = await arquivoVendas(msg); if (!f) return;
     msg.textContent = 'Montando a planilha…';
     const { head, rows } = await lerCelulas(f);
     const I = n => idx(head, n);
     const iBS = I('Bluechip Status'), iSV = I('Status venda'), iCon = I('Conectada'), iPl = I('Plataforma'), iEq = I('Nome Equipe'), iCD = I('CD Bluechip'), iDM = idx(head, 'Data Maxima Prevista Entrega', 'Data Maxima'), iSEP = I('Status Entrega Prevista');
-    if (iBS < 0 || iSV < 0) { msg.className = 'msg err'; msg.textContent = `"${f.name}" não é o relatório de vendas.`; return; }
+    if (iBS < 0 || iSV < 0) { ARQ = null; msg.className = 'msg err'; msg.textContent = `"${f.name}" não é o relatório de vendas.`; return; }
     const v = (r, i) => i < 0 || !r[i] ? null : r[i].v;
     const hoje = dn(isoLocal(new Date()));
     const emp = r => { const p = String(v(r, iPl) || '').trim().toUpperCase(); return p === 'ATN' || p === 'DAHA' ? p : /^DAHA/i.test(String(v(r, iEq) || '')) ? 'DAHA' : 'ATN'; };
@@ -601,16 +580,37 @@
     const S = x => ({ t: 's', v: x });
     const linha = r => { const out = []; const dm = PROC.toDay(v(r, iDM)); head.forEach((h, i) => { if (i === iDM) { out.push(dm ? { t: 'n', v: dn(dm) + 25569, z: 'dd/mm/yyyy' } : null, dm ? { t: 'n', v: hoje - dn(dm) } : null); return; } out.push(r[i]); if (i === iBS) out.push(S(PROC.tratativa(v(r, iBS)))); if (i === iCD) out.push(S(PROC.formaEntrega(v(r, iCD)))); }); return out; };
     const rota = rows.filter(r => okEmp(r) && aprovNaoCon(r) && PROC.emRotaStatus(v(r, iBS)));
-    const trat = rota.filter(r => PROC.tratativa(v(r, iBS)) === 'Tratativa ATN').map(linha);
-    const iForma = head2.indexOf('Forma de Entrega'), iDias = head2.indexOf('Dias em atraso');
-    const cv = c => c ? c.v : null;
-    const cobrar = rota.filter(r => PROC.tratativa(v(r, iBS)) === 'Sem tratativa' && String(v(r, iSEP) || '').trim() === 'Com atraso').map(linha).sort((a, b) => String(cv(a[iForma])).localeCompare(String(cv(b[iForma]))) || (cv(b[iDias]) || 0) - (cv(a[iDias]) || 0));
-    const finalizadas = rows.filter(r => okEmp(r) && aprovNaoCon(r) && PROC.entregaCancelada(v(r, iBS)));
+    const canceladas = rows.filter(r => okEmp(r) && aprovNaoCon(r) && PROC.entregaCancelada(v(r, iBS)));
+    // campos de cada pedido em rota
+    const R = rota.map(r => ({ st: String(v(r, iBS)).trim(), atr: String(v(r, iSEP) || '').trim() === 'Com atraso' ? 'Com atraso' : 'Em dia', trat: PROC.tratativa(v(r, iBS)), forma: PROC.formaEntrega(v(r, iCD)), dm: PROC.toDay(v(r, iDM)) }));
+    const N = x => x ? { t: 'n', v: x } : null;
+    const cnt = f => R.filter(f).length;
+    const status = [...new Set(R.map(x => x.st))].sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+    // Planilha2: status x prazo
+    const p2 = [[S('Contagem de Bluechip Status'), S('Rótulos de Coluna')], [S('Em rota'), S('Com atraso'), S('Em dia'), S('Total Geral')],
+      ...status.map(st => [S(st), N(cnt(x => x.st === st && x.atr === 'Com atraso')), N(cnt(x => x.st === st && x.atr === 'Em dia')), N(cnt(x => x.st === st))]),
+      [S('Total Geral'), N(cnt(x => x.atr === 'Com atraso')), N(cnt(x => x.atr === 'Em dia')), N(R.length)]];
+    // Planilha3: prazo x tratativa e status x tratativa
+    const tt = (f) => [N(cnt(x => f(x) && x.trat === 'Sem tratativa')), N(cnt(x => f(x) && x.trat === 'Tratativa ATN')), N(cnt(f))];
+    const totT = [S('Total Geral'), ...tt(() => true)];
+    const p3 = [[S('Em rota'), S('Sem tratativa'), S('Tratativa ATN'), S('Total Geral')], [S('Com atraso'), ...tt(x => x.atr === 'Com atraso')], [S('Em dia'), ...tt(x => x.atr === 'Em dia')], totT, [],
+      [S('Contagem de Bluechip Status'), S('Rótulos de Coluna')], [S('Em rota'), S('Sem tratativa'), S('Tratativa ATN'), S('Total Geral')], ...status.map(st => [S(st), ...tt(x => x.st === st)]), totT];
+    // Planilha5: data máxima x forma de entrega (com atraso | em dia)
+    const ORD = ['Bluechip Correios', 'Bluechip LOGGI', 'Carteiro Amigo', 'Eu Entrego', 'Motoboy', 'TEX Courier', 'Wareclouds', 'Outros', '(sem CD)'];
+    const grupos = ['Com atraso', 'Em dia'].map(g => ({ g, formas: ORD.filter(fo => R.some(x => x.atr === g && x.forma === fo)) }));
+    const l1 = [S('Contagem de Data Maxima'), S('Rótulos de Coluna')], l2 = [null], l3 = [S('Em rota')];
+    grupos.forEach(({ g, formas }) => { formas.forEach((fo, i) => { l2.push(i === 0 ? S(g) : null); l3.push(S(fo)); }); l2.push(S(g + ' Total')); l3.push(null); });
+    l2.push(S('Total Geral')); l3.push(null);
+    const datas = [...new Set(R.map(x => x.dm || ''))].sort().reverse();
+    const linhaData = (lab, f) => { const o = [lab]; grupos.forEach(({ g, formas }) => { formas.forEach(fo => o.push(N(cnt(x => f(x) && x.atr === g && x.forma === fo)))); o.push(N(cnt(x => f(x) && x.atr === g))); }); o.push(N(cnt(f))); return o; };
+    const p5 = [l1, l2, l3, ...datas.map(d => linhaData(d ? { t: 'n', v: dn(d) + 25569, z: 'dd/mm/yyyy' } : S('(sem data)'), x => (x.dm || '') === d)), linhaData(S('Total Geral'), () => true)];
     const wb = XLSX.utils.book_new();
-    const add = (nm, h, data) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([h.map(S), ...data]), nm);
-    add('Tratativa ATN', head2, trat); add('Cobrar atraso', head2, cobrar); add('Finalizadas', head, finalizadas);
+    const add = (nm, aoa) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), nm);
+    add('Planilha2', p2); add('Planilha3', p3); add('Planilha5', p5);
+    add('Propostas diarias', [head2.map(S), ...rota.map(linha)]);
+    add('CANCELADA', [head.map(S), ...canceladas]);
     XLSX.writeFile(wb, nome);
-    msg.className = 'msg ok'; msg.textContent = `${nome}: Tratativa ATN ${fI(trat.length)} · Cobrar atraso ${fI(cobrar.length)} · Finalizadas ${fI(finalizadas.length)}.`;
+    msg.className = 'msg ok'; msg.textContent = `${nome}: ${fI(R.length)} em rota (Tratativa ATN ${fI(cnt(x => x.trat === 'Tratativa ATN'))}) · ${fI(canceladas.length)} canceladas.`;
   }
 
   /* ================= Vendas e backoffice ================= */
@@ -691,7 +691,7 @@
     });
     root.append(card('Mailing de aceite de voz', 'Vendas das últimas 24 horas com número de OS (1-…), sem SMS prévio e sem aceite de voz. O arquivo sai sempre com a lista completa: apague o mailing anterior no discador e suba este.',
       el('div', { class: 'count-line' }, 'Na base de vendas de ', fDT(bh), ': ', el('b', { text: fI(prev.length) }), ' vendas (', EMPS.map(e => `${e} ${fI(count(prev, r => r.emp === e))}`).join(' · '), '). Ao gerar, o painel usa o arquivo escolhido e as 24 horas até agora.'),
-      el('div', { class: 'toolbar' }, b, msg)));
+      el('div', { class: 'toolbar' }, b, podeEditar() ? arqInfo(msg) : null, msg)));
   }
 
   /* ================= Conectadas ================= */
@@ -775,6 +775,7 @@
         if (tipo === 'gross') { upMsg(`"${f.name}" é a base de gross da TIM. Ela entra na próxima etapa do painel.`, 'err'); continue; }
         if (!tipo) { upMsg(`Não reconheci "${f.name}". Confira se é o relatório de vendas, entregas ou conectadas.`, 'err'); continue; }
         PEND[tipo] = { raw, nome: f.name };
+        if (tipo === 'vendas') ARQ = f;
       } catch (e) { upMsg(`Não consegui ler "${f.name}": ${e.message}`, 'err'); }
     }
     slots();
