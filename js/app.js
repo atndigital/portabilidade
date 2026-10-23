@@ -432,7 +432,7 @@
 
   /* ================= leitura do relatório local (para arquivos com dados de cliente) ================= */
   function escolherArquivo() {
-    return new Promise(res => { const i = $('#pickIn'); i.value = ''; i.onchange = () => res(i.files[0] || null); i.click(); });
+    return new Promise(res => { const i = $('#pickIn'); i.value = ''; i.onchange = () => res(i.files[0] || null); i.oncancel = () => res(null); i.click(); });
   }
   async function lerPlanilha(file, cellDates) {
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', dense: true, cellDates: !!cellDates });
