@@ -742,6 +742,56 @@
     root.append(card('Motivos de não conclusão entre as conectadas', null, legendEl(), hbars(topItems(C.filter(r => r.pt === 'N'), r => r.pm || 'Sem motivo', 12), empsShown(), fP)));
   }
 
+  /* ================= Gross ================= */
+  // Feriados nacionais (não contam como dia útil)
+  const FERIADOS = new Set(['2026-01-01', '2026-04-03', '2026-04-21', '2026-05-01', '2026-09-07', '2026-10-12', '2026-11-02', '2026-11-15', '2026-11-20', '2026-12-25',
+    '2027-01-01', '2027-03-26', '2027-04-21', '2027-05-01', '2027-09-07', '2027-10-12', '2027-11-02', '2027-11-15', '2027-11-20', '2027-12-25']);
+  const DSEM = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+  const diaSem = iso => new Date(dn(iso) * 864e5).getUTCDay();
+  const util = iso => { const w = diaSem(iso); return w >= 1 && w <= 5 && !FERIADOS.has(iso); };
+  function rGross(root) {
+    if (!RAW.V) return semBase('vendas', root);
+    if (!RAW.V.some(r => 'dg' in r)) { root.append(el('div', { class: 'empty' }, el('strong', { text: 'Suba o relatório de vendas de novo' }), el('span', { text: 'A base atual foi publicada antes da aba de gross existir. No próximo upload de vendas os números aparecem aqui.' }))); return; }
+    const base = RAW.V.filter(r => r.dg && (!F.emp || r.emp === F.emp) && (!F.eq || r.eq === F.eq) && (!F.uf || r.uf === F.uf));
+    const ultimo = base.reduce((m, r) => r.dg > m ? r.dg : m, '');
+    if (!ultimo) { root.append(el('p', { class: 'note', text: 'Nenhuma venda marcada como gross no filtro atual.' })); return; }
+    const mes = F.mes || ultimo.slice(0, 7);
+    const G = base.filter(r => r.dg.slice(0, 7) === mes);
+    const fimMes = nd(dn(mes + '-01') + new Date(Date.UTC(+mes.slice(0, 4), +mes.slice(5, 7), 0)).getUTCDate() - 1);
+    const corte = ultimo.slice(0, 7) === mes ? ultimo : fimMes; // último dia com gross no mês
+    const dias = []; for (let d = dn(mes + '-01'); d <= dn(fimMes); d++) dias.push(nd(d));
+    const decorridos = dias.filter(d => d <= corte && util(d)).length, restantes = dias.filter(d => d > corte && util(d)).length;
+    const ems = [...empsShown(), ...(empsShown().length > 1 ? ['Total'] : [])];
+    const de = e => e === 'Total' ? G : G.filter(r => r.emp === e);
+    const real = e => de(e).length, media = e => decorridos ? real(e) / decorridos : null, proj = e => real(e) + (media(e) || 0) * restantes;
+    root.append(el('p', { class: 'lead', text: `Gross pela data de marcação ("Marcado Gross" do relatório de vendas), ${mesNome(mes)}. Realizado até ${fD(corte)}. A projeção soma ao realizado a média por dia útil vezes os dias úteis que faltam até ${fD(fimMes)}. Dia útil = segunda a sexta, sem feriados nacionais. A base oficial de gross da TIM entra na próxima etapa.` }));
+    const tl = el('div', { class: 'tiles' });
+    const tile = (k, fn, hl) => el('div', { class: 'tile' + (hl ? ' hl' : '') }, el('span', { class: 'k', text: k }), el('div', { class: 'pair' }, ems.map(e => el('div', { class: 'emp' }, el('span', { class: 'v c-' + e.toLowerCase() }, fn(e), el('small', { text: e }))))));
+    tl.append(tile(`Gross realizado até ${fD(corte)}`, e => fI(real(e))));
+    tl.append(tile('Média por dia útil', e => fI(media(e))));
+    tl.append(tile(`Projeção até ${fD(fimMes)}`, e => fI(Math.round(proj(e))), true));
+    tl.append(el('div', { class: 'tile' }, el('span', { class: 'k', text: 'Dias úteis no mês' }), el('div', { class: 'pair' }, el('div', { class: 'emp' }, el('span', { class: 'v' }, String(decorridos), el('small', { text: 'decorridos' }))), el('div', { class: 'emp' }, el('span', { class: 'v' }, String(restantes), el('small', { text: 'restantes' }))))));
+    root.append(tl);
+    const g = groupBy(G, r => r.dg);
+    const porDia = (d, e) => (g.get(d) || []).filter(r => e === 'Total' || r.emp === e).length;
+    const [b1, c1] = box(true), [b2, c2] = box(true);
+    root.append(el('div', { class: 'grid' }, card('Gross dia a dia', 'Dias não úteis aparecem com o rótulo entre parênteses.', b1), card('Acumulado e projeção até o fim do mês', 'Linha cheia: realizado. Tracejada: projeção pela média por dia útil.', b2)));
+    const lab = d => util(d) ? fD(d) : `(${fD(d)})`;
+    chart(c1, { type: 'bar', data: { labels: dias.filter(d => d <= corte).map(lab), datasets: empsShown().map(e => ({ label: e, data: dias.filter(d => d <= corte).map(d => porDia(d, e)), backgroundColor: colEmp(e), borderRadius: 3, maxBarThickness: 22 })) }, options: { scales: { y: { beginAtZero: true, stacked: true }, x: { stacked: true } } } });
+    const ds = [];
+    empsShown().forEach(e => {
+      let ac = 0; const realL = dias.map(d => { if (d > corte) return null; ac += porDia(d, e); return ac; });
+      let pj = real(e); const projL = dias.map(d => { if (d < corte) return null; if (d === corte) return pj; if (util(d)) pj += media(e) || 0; return Math.round(pj); });
+      ds.push({ label: e + ' realizado', data: realL, borderColor: colEmp(e), backgroundColor: colEmp(e), borderWidth: 2, pointRadius: 0 });
+      ds.push({ label: e + ' projeção', data: projL, borderColor: colEmp(e), backgroundColor: colEmp(e), borderWidth: 2, pointRadius: 0, borderDash: [6, 4] });
+    });
+    chart(c2, { type: 'line', data: { labels: dias.map(lab), datasets: ds }, options: { scales: { y: { beginAtZero: true }, x: { ticks: { maxRotation: 0, autoSkip: true } } } } });
+    const acc = {}; ems.forEach(e => acc[e] = 0);
+    const rows = dias.filter(d => d <= corte).map(d => { const o = { d: fD(d), ds: DSEM[diaSem(d)], u: util(d) ? 'Sim' : 'Não' }; ems.forEach(e => { o[e] = porDia(d, e); acc[e] += o[e]; o[e + 'a'] = acc[e]; }); return o; });
+    const cols = [{ t: 'Data', k: 'd', l: true }, { t: 'Dia', k: 'ds', l: true }, { t: 'Dia útil', k: 'u', l: true }, ...ems.flatMap(e => [{ t: e, k: e, f: fI }, { t: e + ' acumulado', k: e + 'a', f: fI }])];
+    root.append(card('Tabela dia a dia', null, table(cols, rows, { maxh: '520px' })));
+  }
+
   /* ================= Pontos de melhoria ================= */
   function rMelhoria(root) {
     const out = [];
@@ -772,7 +822,7 @@
     root.append(el('p', { class: 'lead', text: 'Pontos calculados com os filtros atuais.' }), el('div', { class: 'insights' }, out.map(o => el('div', { class: 'card ins ' + o.sev }, el('h3', { text: o.t }), el('div', { class: 'big', text: o.big }), el('p', { text: o.p }), el('p', { class: 'acao' }, el('b', { text: 'Ação: ' }), o.a)))));
   }
 
-  const RENDER = { geral: rGeral, tratativa: rTratativa, port: rPort, entrega: rEntrega, vendas: rVendas, conect: rConect, melhoria: rMelhoria };
+  const RENDER = { geral: rGeral, gross: rGross, tratativa: rTratativa, port: rPort, entrega: rEntrega, vendas: rVendas, conect: rConect, melhoria: rMelhoria };
   function render() {
     destroyCharts();
     const root = $('#content'); root.replaceChildren();

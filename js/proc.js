@@ -160,6 +160,7 @@
         pos: !!txt(pick(r, ['POS VENDA'])),
         so: txt(pick(r, ['STATUS ORDEM', 'STATUS DA ORDEM'])), chip: txt(pick(r, ['TIPO CHIP'])),
         os1: !!os && /^1-/.test(os),
+        dg: toDay(pick(r, ['MARCADO GROSS'])),
         nt: txt(pick(r, ['NUMERO TEMPORARIO'])), abr: txt(pick(r, ['STATUS ABR']))
       };
     }).filter(r => r.p || r.dv);
@@ -204,7 +205,7 @@
   }
 
   const COLS = {
-    vendas: ['p', 'dv', 'dvt', 'emp', 'eq', 'sup', 'vend', 'uf', 'sv', 'mr', 'fl', 'con', 'dcon', 'bs', 'bg', 'bm', 'dbs', 'sep', 'cd', 'forma', 'dmax', 'qr', 'pt', 'pm', 'pd', 'pa', 'sms', 'aceOp', 'dacet', 'pos', 'so', 'chip', 'os1', 'nt', 'abr'],
+    vendas: ['p', 'dv', 'dvt', 'emp', 'eq', 'sup', 'vend', 'uf', 'sv', 'mr', 'fl', 'con', 'dcon', 'bs', 'bg', 'bm', 'dbs', 'sep', 'cd', 'forma', 'dmax', 'qr', 'pt', 'pm', 'pd', 'pa', 'sms', 'aceOp', 'dacet', 'pos', 'so', 'chip', 'os1', 'dg', 'nt', 'abr'],
     entregas: ['p', 'dv', 'de', 'emp', 'eq', 'ace', 'pos', 'pt', 'pm', 'pd', 'fl', 'sms', 'so', 'pa', 'chip'],
     conectadas: ['p', 'dv', 'da', 'emp', 'eq', 'ace', 'pos', 'pt', 'pm', 'pd', 'fl', 'so', 'chip', 'nt', 'auto']
   };
