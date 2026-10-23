@@ -354,8 +354,36 @@
       root.append(el('div', { class: 'grid' }, card('Motivos de não conclusão', '% das não concluídas de cada empresa.', legendEl(), hbars(topItems(E.filter(r => r.pt === 'N'), r => r.pm || 'Sem motivo informado', 12), empsShown(), fP)),
         card('Status da ordem dos pedidos não concluídos ou pendentes', null, legendEl(), hbars(topItems(E.filter(r => r.pt !== 'C'), r => r.so || 'Sem status de ordem', 10), empsShown(), fP))));
     }
-    if (RAW.V) filaRetargeting(root); else semBase('vendas', root);
+    if (RAW.V) { reprocessadas(root); filaRetargeting(root); } else semBase('vendas', root);
     historicoMailings(root);
+  }
+
+  /* --- Vendas reprocessadas (reativação após a entrega) --- */
+  function reprocessadas(root) {
+    const ent = filt(RAW.V.filter(r => r.bg === 'Entregue' && r.dbs), 'dbs');
+    const R = ent.filter(r => r.rep);
+    R.forEach(r => { r._react = r.dcon ? dn(r.dcon) - dn(r.dbs) : null; });
+    root.append(el('h2', { class: 'sec-title', text: 'Vendas reprocessadas' }),
+      el('p', { class: 'lead', text: 'Pedidos entregues com a flag "reprocessado aprovisionamento" (nova ativação depois da entrega), pela data da entrega. Segue os filtros do topo. Tempo até a nova ativação = data de conectada menos data da entrega.' }));
+    if (!R.length) { root.append(el('p', { class: 'note', text: 'Nenhuma venda reprocessada no filtro atual.' })); return; }
+    const bR = byEmp(R), bE = byEmp(ent);
+    const tl = el('div', { class: 'tiles' });
+    tl.append(tileEmp('Reprocessadas', e => ({ v: fI(bR[e].length), sub: [el('b', { text: fP(pct(bR[e].length, bE[e].length)) }), ' das entregues'] })));
+    tl.append(tileEmp('Portabilidade concluída', e => ({ v: fP(pct(count(bR[e], r => r.pt === 'C'), bR[e].length)), sub: [el('b', { text: fI(count(bR[e], r => r.pt === 'C')) }), ' de ', fI(bR[e].length)] }), true));
+    tl.append(tileEmp('Pendente', e => ({ v: fP(pct(count(bR[e], r => r.pt === 'P'), bR[e].length)), sub: [el('b', { text: fI(count(bR[e], r => r.pt === 'P')) }), ' pedidos'] })));
+    tl.append(tileEmp('Não concluída', e => ({ v: fP(pct(count(bR[e], r => r.pt === 'N'), bR[e].length)), sub: [el('b', { text: fI(count(bR[e], r => r.pt === 'N')) }), ' pedidos'] })));
+    tl.append(tileEmp('Mediana até a nova ativação', e => ({ v: fI(median(bR[e].filter(r => r._react != null).map(r => r._react))), sub: 'dias após a entrega' })));
+    root.append(tl);
+    const faixas = [['Até 3 dias', d => d != null && d <= 3], ['4 a 7 dias', d => d >= 4 && d <= 7], ['8 a 15 dias', d => d >= 8 && d <= 15], ['Mais de 15 dias', d => d > 15], ['Sem data de nova ativação', d => d == null]];
+    const tf = faixas.map(([k, f]) => { const o = { k }; empsShown().forEach(e => { const a = bR[e].filter(r => f(r._react)); o[e + 'n'] = a.length; o[e + 'c'] = count(a, r => r.pt === 'C'); o[e + 'p'] = a.length ? pct(o[e + 'c'], a.length) : null; }); return o; });
+    const colsF = [{ t: 'Tempo da entrega até a nova ativação', k: 'k', l: true }, ...empsShown().flatMap(e => [{ t: e + ' pedidos', k: e + 'n', f: fI }, { t: 'Concluídas', k: e + 'c', f: fI }, { t: '% concluída', k: e + 'p', f: fP, cls: v => v == null ? '' : v >= .25 ? 'good' : v >= .15 ? 'warn' : 'bad' }])];
+    const eqRows = [...groupBy(R, r => r.eq || '(sem equipe)').entries()].map(([k, a]) => ({ k, emp: a[0].emp, n: a.length, pE: pct(a.length, count(ent, r => r.eq === k)), c: count(a, r => r.pt === 'C'), pc: pct(count(a, r => r.pt === 'C'), a.length), med: median(a.filter(r => r._react != null).map(r => r._react)) }));
+    root.append(el('div', { class: 'grid' },
+      card('Conclusão pelo tempo até a nova ativação', 'Quanto mais cedo a venda é reprocessada depois da entrega, mais ela conclui.', table(colsF, tf, { maxh: 'none' })),
+      card('Reprocessadas por equipe', null, table([{ t: 'Equipe', k: 'k', l: true }, { t: 'Empresa', k: 'emp', l: true, render: v => empPill(v) }, { t: 'Reprocessadas', k: 'n', f: fI }, { t: '% das entregues', k: 'pE', f: fP }, { t: 'Concluídas', k: 'c', f: fI }, { t: '% concluída', k: 'pc', f: fP }, { t: 'Mediana dias até reativar', k: 'med', f: fI }], eqRows, { sortable: true, sortKey: 'n', maxh: '360px' }))));
+    root.append(el('div', { class: 'grid' },
+      card('Motivos de não conclusão das reprocessadas', '% das reprocessadas não concluídas.', legendEl(), hbars(topItems(R.filter(r => r.pt === 'N'), r => r.pm || 'Sem motivo informado', 10), empsShown(), fP)),
+      card('Status da ordem das reprocessadas ainda sem conclusão', 'Não concluídas e pendentes.', legendEl(), hbars(topItems(R.filter(r => r.pt !== 'C'), r => r.so || 'Sem status de ordem', 8), empsShown(), fP))));
   }
 
   /* --- Fila de retargeting (vendas) --- */
