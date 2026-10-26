@@ -31,8 +31,8 @@
   function baixar(nome, blob) { const a = el('a', { href: URL.createObjectURL(blob), download: nome }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
 
   /* ================= estado ================= */
-  const CHAVE = { vendas: 'V', conectadas: 'C', gross_atn: 'GA', gross_daha: 'GD' };
-  let ME = null, PAPEL = null, RAW = { V: null, E: null, C: null, GA: null, GD: null, G: null }, CARGAS = {}, REF_E = null, HOJE = null;
+  const CHAVE = { vendas: 'V', entregas: 'EF', conectadas: 'C', gross_atn: 'GA', gross_daha: 'GD' };
+  let ME = null, PAPEL = null, RAW = { V: null, EF: null, E: null, C: null, GA: null, GD: null, G: null }, CARGAS = {}, REF_E = null, HOJE = null;
   const F = { mes: '', emp: '', eq: '', uf: '', ini: '', fim: '' };
   let TAB = (location.hash || '').slice(1) || 'geral';
   const charts = [];
@@ -131,14 +131,27 @@
     HOJE = dn(isoLocal(new Date()));
     RAW.G = (RAW.GA || RAW.GD) ? [...(RAW.GA || []), ...(RAW.GD || [])] : null;
     // Entregas de chip: montadas a partir do relatório de vendas (pedido entregue; data da entrega = data do status Bluechip)
-    RAW.E = RAW.V ? RAW.V.filter(r => r.bg === 'Entregue' && r.dbs).map(r => ({ p: r.p, dv: r.dv, de: r.dbs, emp: r.emp, eq: r.eq, ace: !!r.aceOp, pos: r.pos, pt: r.pt, pm: r.pm, pd: r.pd, fl: r.fl, sms: r.sms, so: r.so, pa: r.pa, chip: r.chip })) : null;
+    // e com o relatório de entregas (traz tudo que foi entregue no mês, inclusive vendas de meses anteriores).
+    // Pedido nos dois: os status vêm do arquivo enviado por último.
+    if (RAW.V || RAW.EF) {
+      const em = new Map(); (RAW.EF || []).forEach(r => r.p && em.set(r.p, Object.assign({}, r)));
+      const vNovo = !CARGAS.entregas || (CARGAS.vendas && CARGAS.vendas.enviado_em > CARGAS.entregas.enviado_em);
+      let efMax = ''; (RAW.EF || []).forEach(r => { if (r.de > efMax) efMax = r.de; });
+      for (const r of (RAW.V || [])) {
+        if (r.bg !== 'Entregue' || !r.dbs) continue;
+        const o = { p: r.p, dv: r.dv, de: r.dbs, emp: r.emp, eq: r.eq, ace: !!r.aceOp, pos: r.pos, pt: r.pt, pm: r.pm, pd: r.pd, fl: r.fl, sms: r.sms, so: r.so, pa: r.pa, chip: r.chip };
+        const x = em.get(r.p);
+        if (!x) { if (r.dbs.slice(0, 10) > efMax.slice(0, 10)) em.set(r.p, o); } else if (vNovo) Object.assign(x, o, { de: x.de });
+      }
+      RAW.E = [...em.values()];
+    } else RAW.E = null;
     if (RAW.E && RAW.E.length) { let mx = 0; for (const r of RAW.E) { mx = Math.max(mx, dn(r.de)); const v = vmap.get(r.p); r.uf = v ? v.uf : null; } REF_E = mx + 1; for (const r of RAW.E) { r.obs = REF_E - dn(r.de); r.lag = r.pd ? dn(r.pd) - dn(r.de) : null; } }
     if (RAW.C) for (const r of RAW.C) { const v = vmap.get(r.p); r.uf = v ? v.uf : null; r.dAt = r.dv ? dn(r.da) - dn(r.dv) : null; }
     if (RAW.V) for (const r of RAW.V) { r.forma = r.bs ? PROC.formaEntrega(r.cd) : null; r.dEnt = r.bg === 'Entregue' && r.dbs ? dn(r.dbs) - dn(r.dv) : null; r.rep = /reprocessado/i.test(r.fl || ''); }
   }
   function setStatus() {
     const s = $('#status'); s.replaceChildren();
-    const parts = [['vendas', 'Vendas e entregas'], ['conectadas', 'Conectadas'], ['gross_atn', 'Gross ATN'], ['gross_daha', 'Gross DAHA']].filter(([t]) => CARGAS[t]);
+    const parts = [['vendas', 'Vendas'], ['entregas', 'Entregas'], ['conectadas', 'Conectadas'], ['gross_atn', 'Gross ATN'], ['gross_daha', 'Gross DAHA']].filter(([t]) => CARGAS[t]);
     if (!parts.length) { s.textContent = 'Nenhuma base carregada'; return; }
     parts.forEach(([t, n], i) => { if (i) s.append(' · '); s.append(n + ': ', el('b', { text: fDT(CARGAS[t].enviado_em) })); });
   }
@@ -154,6 +167,12 @@
       if (F.uf && r.uf !== F.uf) return false;
       return true;
     });
+  }
+  // Entregas finalizadas no período, pela data da entrega ou do insucesso (status Bluechip)
+  function finalizadas() {
+    const ent = filt(RAW.E || [], 'de');
+    const ins = filt((RAW.V || []).filter(r => r.bg === 'Insucesso' && r.dbs), 'dbs');
+    return { ent, ins };
   }
   const empsShown = () => F.emp ? [F.emp] : EMPS;
   const byEmp = rows => { const o = {}; for (const e of empsShown()) o[e] = rows.filter(r => r.emp === e); return o; };
@@ -252,27 +271,28 @@
   function rGeral(root) {
     if (!RAW.V) return semBase('vendas', root);
     const V = filt(RAW.V, 'dv');
-    root.append(el('p', { class: 'lead', text: 'Base: relatório de vendas, pela data da venda. Aprovada = venda aceita. Conectada = cliente com o chip em mãos. Cada card mostra a quantidade e, embaixo, sobre o que o % é calculado.' }));
-    const m = {};
+    root.append(el('p', { class: 'lead', text: 'Base: relatório de vendas, pela data da venda. Exceção: entregues e insucesso, que contam pela data da entrega ou do insucesso, qualquer que seja o mês da venda. Aprovada = venda aceita. Conectada = cliente com o chip em mãos. Cada card mostra a quantidade e, embaixo, sobre o que o % é calculado.' }));
+    const m = {}; const FZ = finalizadas();
     for (const e of [...empsShown(), 'Total']) {
       const r = e === 'Total' ? V : V.filter(x => x.emp === e);
       const ap = r.filter(x => x.sv === 'APROVADA'), env = r.filter(x => x.bg !== 'Não enviado'), cn = ap.filter(x => x.con);
       const ent = count(env, x => x.bg === 'Entregue'), ins = count(env, x => x.bg === 'Insucesso');
       const pc = count(ap, x => x.pt === 'C'), pcc = count(cn, x => x.pt === 'C');
       m[e] = { vendas: r.length, aprov: ap.length, rej: count(r, x => x.sv === 'REJEITADA'), canc: count(r, x => x.sv === 'CANCELADA'), env: env.length, ent, ins, con: cn.length, pc, pcc,
-        pp: count(ap, x => x.pt === 'P'), pn: count(ap, x => x.pt === 'N') };
+        pp: count(ap, x => x.pt === 'P'), pn: count(ap, x => x.pt === 'N'),
+        fe: e === 'Total' ? FZ.ent.length : count(FZ.ent, x => x.emp === e), fi: e === 'Total' ? FZ.ins.length : count(FZ.ins, x => x.emp === e) };
     }
     const tl = el('div', { class: 'tiles' });
     tl.append(tileEmp('Vendas', e => ({ v: fI(m[e].vendas) })));
     tl.append(tileEmp('Aprovadas (venda aceita)', e => ({ v: fI(m[e].aprov), sub: [el('b', { text: fP(pct(m[e].aprov, m[e].vendas)) }), ' das vendas'] })));
-    tl.append(tileEmp('Entregues', e => ({ v: fI(m[e].ent), sub: [el('b', { text: fP(pct(m[e].ent, m[e].env)) }), ' das enviadas'] })));
-    tl.append(tileEmp('Insucesso de entrega', e => ({ v: fI(m[e].ins), sub: [el('b', { text: fP(pct(m[e].ins, m[e].env)) }), ' das enviadas'] })));
+    tl.append(tileEmp('Entregues (pela data da entrega)', e => ({ v: fI(m[e].fe), sub: [el('b', { text: fP(pct(m[e].fe, m[e].fe + m[e].fi)) }), ' das finalizadas (entregue + insucesso)'] })));
+    tl.append(tileEmp('Insucesso de entrega (pela data)', e => ({ v: fI(m[e].fi), sub: [el('b', { text: fP(pct(m[e].fi, m[e].fe + m[e].fi)) }), ' das finalizadas (entregue + insucesso)'] })));
     tl.append(tileEmp('Conectadas (chip em mãos)', e => ({ v: fI(m[e].con), sub: [el('b', { text: fP(pct(m[e].con, m[e].aprov)) }), ' das aprovadas'] })));
     tl.append(tileEmp('Portabilidade concluída', e => ({ v: fI(m[e].pc), sub: [el('b', { text: fP(pct(m[e].pcc, m[e].con)) }), ' das conectadas · ', fP(pct(m[e].pc, m[e].aprov)), ' das aprovadas'] }), true));
     root.append(tl);
     const keys = [...empsShown(), ...(empsShown().length > 1 ? ['Total'] : [])];
     const rowsDef = [['Vendas', 'vendas'], ['Aprovadas', 'aprov', 'vendas', '% das vendas'], ['Rejeitadas', 'rej', 'vendas', '% das vendas'], ['Canceladas', 'canc', 'vendas', '% das vendas'],
-      ['Enviadas para entrega', 'env', 'vendas', '% das vendas'], ['Entregues', 'ent', 'env', '% das enviadas'], ['Insucesso de entrega', 'ins', 'env', '% das enviadas'],
+      ['Enviadas para entrega', 'env', 'vendas', '% das vendas'], ['Entregues (das vendas do período)', 'ent', 'env', '% das enviadas'], ['Insucesso (das vendas do período)', 'ins', 'env', '% das enviadas'],
       ['Conectadas (chip em mãos)', 'con', 'aprov', '% das aprovadas'], ['Portabilidade concluída (entre as conectadas)', 'pcc', 'con', '% das conectadas'], ['Portabilidade concluída (entre as aprovadas)', 'pc', 'aprov', '% das aprovadas'],
       ['Portabilidade pendente', 'pp', 'aprov', '% das aprovadas'], ['Portabilidade não concluída', 'pn', 'aprov', '% das aprovadas']];
     const cols = [{ t: 'Etapa', k: 'et', l: true }, ...keys.flatMap(e => [{ t: e, k: e + 'n', f: fI }, { t: '%', k: e + 'p', f: fP }]), { t: 'Base do %', k: 'base', l: true }];
@@ -525,21 +545,25 @@
   function rEntrega(root) {
     if (!RAW.V) return semBase('vendas', root);
     emRota(root);
-    const V = filt(RAW.V, 'dv'); const env = V.filter(r => r.bg !== 'Não enviado'); const be = byEmp(env);
-    root.append(el('h2', { class: 'sec-title', text: 'Entregas no período' }), el('p', { class: 'lead', text: 'Pedidos enviados à logística, pela data da venda. Insucesso = entrega cancelada, extravio ou devolução.' }));
+    const FZ = finalizadas(); const bE = byEmp(FZ.ent), bI = byEmp(FZ.ins);
+    const env = filt(RAW.V.filter(r => (r.bg === 'Entregue' || r.bg === 'Insucesso') && r.dbs), 'dbs'); const be = byEmp(env);
+    root.append(el('h2', { class: 'sec-title', text: 'Entregas finalizadas no período' }), el('p', { class: 'lead', text: 'Pela data da entrega ou do insucesso (status Bluechip), qualquer que seja o mês da venda. % entregue e % insucesso = sobre as finalizadas (entregue + insucesso); pedidos ainda em rota ficam no bloco acima. Insucesso = entrega cancelada, extravio ou devolução.' }));
     const tl = el('div', { class: 'tiles' });
     const T = (k, fn) => tl.append(tileEmp(k, e => fn(be[e])));
-    T('Enviados', r => ({ v: fI(r.length) })); T('Entregues', r => ({ v: fP(pct(count(r, x => x.bg === 'Entregue'), r.length)) })); T('Insucesso', r => ({ v: fP(pct(count(r, x => x.bg === 'Insucesso'), r.length)) }));
+    const TE = (k, fn) => tl.append(tileEmp(k, e => fn(bE[e], bI[e])));
+    TE('Finalizadas', (a, b) => ({ v: fI(a.length + b.length) }));
+    TE('Entregues', (a, b) => ({ v: fP(pct(a.length, a.length + b.length)), sub: [el('b', { text: fI(a.length) }), ' pedidos'] }));
+    TE('Insucesso', (a, b) => ({ v: fP(pct(b.length, a.length + b.length)), sub: [el('b', { text: fI(b.length) }), ' pedidos'] }));
     T('Finalizado com atraso', r => { const f = r.filter(x => /^Finalizado/.test(x.sep || '')); return { v: fP(pct(count(f, x => /atraso/i.test(x.sep)), f.length)) }; });
-    T('Mediana venda → entrega (dias)', r => ({ v: fI(median(r.filter(x => x.dEnt != null).map(x => x.dEnt))) }));
+    TE('Mediana venda → entrega (dias)', a => ({ v: fI(median(a.filter(x => x.dv).map(x => dn(x.de) - dn(x.dv)))) }));
     root.append(tl);
     const ins = env.filter(r => r.bg === 'Insucesso');
     root.append(el('div', { class: 'grid' }, card('Motivos de insucesso de entrega', '% dos insucessos de cada empresa.', legendEl(), hbars(topItems(ins, r => r.bm || 'Sem motivo', 12), empsShown(), fP)),
       card('Insucesso por forma de entrega', null, (() => { const rows = [...groupBy(env, r => r.forma || '(sem CD)').entries()].map(([k, a]) => ({ k, n: a.length, ent: pct(count(a, x => x.bg === 'Entregue'), a.length), ins: pct(count(a, x => x.bg === 'Insucesso'), a.length), med: median(a.filter(x => x.dEnt != null).map(x => x.dEnt)) }));
-        return table([{ t: 'Forma de entrega', k: 'k', l: true }, { t: 'Enviados', k: 'n', f: fI }, { t: '% entregue', k: 'ent', f: fP }, { t: '% insucesso', k: 'ins', f: fP, cls: v => v >= .15 ? 'bad' : v >= .1 ? 'warn' : '' }, { t: 'Mediana dias', k: 'med', f: fI }], rows, { sortable: true, sortKey: 'n', maxh: '360px' }); })())));
+        return table([{ t: 'Forma de entrega', k: 'k', l: true }, { t: 'Finalizadas', k: 'n', f: fI }, { t: '% entregue', k: 'ent', f: fP }, { t: '% insucesso', k: 'ins', f: fP, cls: v => v >= .15 ? 'bad' : v >= .1 ? 'warn' : '' }, { t: 'Mediana dias', k: 'med', f: fI }], rows, { sortable: true, sortKey: 'n', maxh: '360px' }); })())));
     const dimTable = (key, label, min) => { const rows = [...groupBy(env, r => r[key] || '(não informado)').entries()].filter(([, a]) => a.length >= min).map(([k, a]) => { const fin = a.filter(x => /^Finalizado/.test(x.sep || '')); return { k, n: a.length, ent: pct(count(a, x => x.bg === 'Entregue'), a.length), ins: pct(count(a, x => x.bg === 'Insucesso'), a.length), atr: pct(count(fin, x => /atraso/i.test(x.sep)), fin.length), med: median(a.filter(x => x.dEnt != null).map(x => x.dEnt)) }; });
-      return table([{ t: label, k: 'k', l: true }, { t: 'Enviados', k: 'n', f: fI }, { t: '% entregue', k: 'ent', f: fP }, { t: '% insucesso', k: 'ins', f: fP, cls: v => v >= .15 ? 'bad' : v >= .1 ? 'warn' : '' }, { t: '% com atraso', k: 'atr', f: fP, cls: v => v >= .5 ? 'bad' : v >= .35 ? 'warn' : '' }, { t: 'Mediana dias', k: 'med', f: fI }], rows, { sortable: true, sortKey: 'ins', maxh: '420px' }); };
-    root.append(el('div', { class: 'grid' }, card('Insucesso por centro de distribuição', 'CDs com 30 envios ou mais.', dimTable('cd', 'CD', 30)), card('Insucesso por UF', 'UFs com 30 envios ou mais.', dimTable('uf', 'UF', 30))));
+      return table([{ t: label, k: 'k', l: true }, { t: 'Finalizadas', k: 'n', f: fI }, { t: '% entregue', k: 'ent', f: fP }, { t: '% insucesso', k: 'ins', f: fP, cls: v => v >= .15 ? 'bad' : v >= .1 ? 'warn' : '' }, { t: '% com atraso', k: 'atr', f: fP, cls: v => v >= .5 ? 'bad' : v >= .35 ? 'warn' : '' }, { t: 'Mediana dias', k: 'med', f: fI }], rows, { sortable: true, sortKey: 'ins', maxh: '420px' }); };
+    root.append(el('div', { class: 'grid' }, card('Insucesso por centro de distribuição', 'CDs com 30 finalizadas ou mais.', dimTable('cd', 'CD', 30)), card('Insucesso por UF', 'UFs com 30 finalizadas ou mais.', dimTable('uf', 'UF', 30))));
   }
   function emRota(root) {
     const base = RAW.V.filter(r => r.sv === 'APROVADA' && !r.con && PROC.emRotaStatus(r.bs) && (!F.emp || r.emp === F.emp) && (!F.eq || r.eq === F.eq) && (!F.uf || r.uf === F.uf));
@@ -814,8 +838,8 @@
       const V = filt(RAW.V, 'dv');
       const rt = RAW.V.filter(r => r.bg === 'Entregue' && r.pt === 'N' && r.sv === 'APROVADA' && !r.aceOp && (!F.emp || r.emp === F.emp));
       out.push({ sev: 'bad', t: 'Fila de retargeting', big: fI(rt.length) + ' pedidos', p: `Entregues com portabilidade não concluída (${perEmp(e => fI(count(rt, r => r.emp === e)))}).`, a: 'Filtrar na aba Portabilidade e gerar o mailing BKO_TIM_POS_VENDA_retargeting.' });
-      const env = V.filter(r => r.bg !== 'Não enviado'), ins = env.filter(r => r.bg === 'Insucesso');
-      out.push({ sev: pct(ins.length, env.length) > .1 ? 'bad' : 'warn', t: 'Insucesso de entrega', big: fP(pct(ins.length, env.length)) + ' dos envios', p: `Principais motivos: ${topItems(ins, r => r.bm || 'Sem motivo', 2).map(t => t.label).join(' e ')}.`, a: 'Validar endereço na venda e tratar os casos de Tratativa ATN da aba Entrega.' });
+      const FZ = finalizadas(), ins = FZ.ins, nFin = FZ.ent.length + FZ.ins.length;
+      out.push({ sev: pct(ins.length, nFin) > .1 ? 'bad' : 'warn', t: 'Insucesso de entrega', big: fP(pct(ins.length, nFin)) + ' das finalizadas', p: `Principais motivos: ${topItems(ins, r => r.bm || 'Sem motivo', 2).map(t => t.label).join(' e ')}.`, a: 'Validar endereço na venda e tratar os casos de Tratativa ATN da aba Entrega.' });
       const rota = RAW.V.filter(r => r.sv === 'APROVADA' && !r.con && PROC.emRotaStatus(r.bs) && (!F.emp || r.emp === F.emp));
       out.push({ sev: 'warn', t: 'Em rota com atraso', big: fI(count(rota, r => r.sep === 'Com atraso')) + ' pedidos', p: `${fI(count(rota, r => PROC.tratativa(r.bs, r.fl) === 'Tratativa ATN'))} pedidos em rota dependem de tratativa da ATN.`, a: 'Exportar a planilha Rota e cobrar as transportadoras.' });
       const ap = V.filter(r => r.sv === 'APROVADA'), cn = ap.filter(r => r.con); const media = pct(count(cn, r => r.pt === 'C'), cn.length);
@@ -847,8 +871,8 @@
 
   /* ================= upload ================= */
   const PEND = {};
-  const NOMES = { vendas: 'Vendas', conectadas: 'Conectadas', gross_atn: 'Gross TIM · ATN', gross_daha: 'Gross TIM · DAHA' };
-  function slots() { $('#slots').replaceChildren(...['vendas', 'conectadas', 'gross_atn', 'gross_daha'].map(k => el('div', { class: 'slot' + (PEND[k] ? ' ok' : '') }, el('b', { text: NOMES[k] }), el('div', { class: 'nm', text: PEND[k] ? `${PEND[k].nome} · ${fI(PEND[k].raw.length)} linhas` : (CARGAS[k] ? `atual: ${fDT(CARGAS[k].enviado_em)}` : 'sem base') })))); }
+  const NOMES = { vendas: 'Vendas', entregas: 'Entregas de chip', conectadas: 'Conectadas', gross_atn: 'Gross TIM · ATN', gross_daha: 'Gross TIM · DAHA' };
+  function slots() { $('#slots').replaceChildren(...['vendas', 'entregas', 'conectadas', 'gross_atn', 'gross_daha'].map(k => el('div', { class: 'slot' + (PEND[k] ? ' ok' : '') }, el('b', { text: NOMES[k] }), el('div', { class: 'nm', text: PEND[k] ? `${PEND[k].nome} · ${fI(PEND[k].raw.length)} linhas` : (CARGAS[k] ? `atual: ${fDT(CARGAS[k].enviado_em)}` : 'sem base') })))); }
   $('#btnUpd').addEventListener('click', () => { $('#upPanel').hidden = false; slots(); $('#upPanel').scrollIntoView({ block: 'start' }); });
   $('#btnFechar').addEventListener('click', () => { $('#upPanel').hidden = true; });
   $('#btnEscolher').addEventListener('click', () => $('#fileIn').click());
@@ -865,7 +889,6 @@
         const wb = XLSX.read(await f.arrayBuffer(), { type: 'array', dense: true });
         const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { raw: true, defval: null });
         const tipo = PROC.detect(raw);
-        if (tipo === 'entregas') { upMsg(`"${f.name}" não precisa subir: as entregas de chip saem do relatório de vendas.`, 'err'); continue; }
         if (tipo === 'gross') { const k = 'gross_' + PROC.empresaGross(raw).toLowerCase(); PEND[k] = { raw, nome: f.name }; continue; }
         if (!tipo) { upMsg(`Não reconheci "${f.name}". Confira se é o relatório de vendas, entregas ou conectadas.`, 'err'); continue; }
         PEND[tipo] = { raw, nome: f.name };
@@ -887,6 +910,11 @@
           const novos = PROC.procGross(PEND[tipo].raw); const meses = new Set(novos.map(r => r.dt.slice(0, 7)));
           const antigos = (RAW[CHAVE[tipo]] || []).filter(r => !meses.has(r.dt.slice(0, 7)));
           base = { versao: 2, tipo, t: PROC.encode([...antigos, ...novos], PROC.COLS.gross) };
+        } else if (tipo === 'entregas') {
+          // o relatório de entregas vem pelo mês da entrega: guarda os meses anteriores que já estavam na base
+          const novos = PROC.procEntregas(PEND[tipo].raw); const meses = new Set(novos.map(r => r.de.slice(0, 7))); const ps = new Set(novos.map(r => r.p));
+          const antigos = (RAW.EF || []).filter(r => r.de && !meses.has(r.de.slice(0, 7)) && !ps.has(r.p));
+          base = { versao: 2, tipo, t: PROC.encode([...antigos, ...novos], PROC.COLS.entregas) };
         } else if (tipo === 'vendas' || tipo === 'conectadas') {
           // o relatório pode vir só com o mês corrente: o arquivo novo manda no que ele traz;
           // vendas mais antigas que a primeira venda do arquivo continuam da base anterior (até 3 meses)
