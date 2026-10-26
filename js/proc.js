@@ -96,7 +96,9 @@
     'Recebido na base de transferencia da Transportadora', 'Situação de Risco', 'SLA Atualizado Correios'].map(norm);
   const TRATATIVA_ATN = ['Aguardando retirada Correios', 'Cliente Ausente', 'Cliente Mudou-se', 'Destinatário Desconhecido', 'Endereço incorreto', 'Endereço inválido', 'Situação de Risco'].map(norm);
   const emRotaStatus = s => !!s && EM_ROTA.includes(norm(s));
-  const tratativa = s => (s && TRATATIVA_ATN.includes(norm(s))) ? 'Tratativa ATN' : 'Sem tratativa';
+  // Flags de pedidos que já estão em tratativa: não entram na Tratativa ATN
+  const FLAGS_FORA = ['REENVIO', 'TRATATIVA ATN', 'ENTREGA SEM ICCID'];
+  const tratativa = (s, flag) => (s && TRATATIVA_ATN.includes(norm(s)) && !FLAGS_FORA.includes(norm(flag || ''))) ? 'Tratativa ATN' : 'Sem tratativa';
   const entregaCancelada = s => !!s && /^ENTREGA CANCELADA/.test(norm(s));
   function formaEntrega(cd) {
     const c = norm(cd || '');
@@ -106,7 +108,8 @@
     if (/^LOGGI/.test(c)) return 'Bluechip LOGGI';
     if (/^CARTEIRO/.test(c)) return 'Carteiro Amigo';
     if (/^EU ENTREGO/.test(c)) return 'Eu Entrego';
-    if (/^TEX/.test(c)) return 'TEX Courier';
+    if (/^TEX/.test(c) || /^CD TIM/.test(c) || c === 'TIM' || /^TIM BRASIL/.test(c)) return 'Motoboy';
+    if (/^STONE/.test(c)) return 'Stone';
     if (/^WARECLOUDS/.test(c)) return 'Wareclouds';
     return 'Outros';
   }

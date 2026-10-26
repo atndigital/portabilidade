@@ -134,7 +134,7 @@
     RAW.E = RAW.V ? RAW.V.filter(r => r.bg === 'Entregue' && r.dbs).map(r => ({ p: r.p, dv: r.dv, de: r.dbs, emp: r.emp, eq: r.eq, ace: !!r.aceOp, pos: r.pos, pt: r.pt, pm: r.pm, pd: r.pd, fl: r.fl, sms: r.sms, so: r.so, pa: r.pa, chip: r.chip })) : null;
     if (RAW.E && RAW.E.length) { let mx = 0; for (const r of RAW.E) { mx = Math.max(mx, dn(r.de)); const v = vmap.get(r.p); r.uf = v ? v.uf : null; } REF_E = mx + 1; for (const r of RAW.E) { r.obs = REF_E - dn(r.de); r.lag = r.pd ? dn(r.pd) - dn(r.de) : null; } }
     if (RAW.C) for (const r of RAW.C) { const v = vmap.get(r.p); r.uf = v ? v.uf : null; r.dAt = r.dv ? dn(r.da) - dn(r.dv) : null; }
-    if (RAW.V) for (const r of RAW.V) { r.dEnt = r.bg === 'Entregue' && r.dbs ? dn(r.dbs) - dn(r.dv) : null; r.rep = /reprocessado/i.test(r.fl || ''); }
+    if (RAW.V) for (const r of RAW.V) { r.forma = r.bs ? PROC.formaEntrega(r.cd) : null; r.dEnt = r.bg === 'Entregue' && r.dbs ? dn(r.dbs) - dn(r.dv) : null; r.rep = /reprocessado/i.test(r.fl || ''); }
   }
   function setStatus() {
     const s = $('#status'); s.replaceChildren();
@@ -395,7 +395,7 @@
   function filaRetargeting(root) {
     const st = Object.assign({}, FR_PADRAO, LS.get('fila', {}));
     const salvar = () => LS.set('fila', st);
-    const baseAll = RAW.V.filter(r => r.bg === 'Entregue' && r.pt === 'N' && (!F.emp || r.emp === F.emp) && (!F.eq || r.eq === F.eq) && (!F.uf || r.uf === F.uf));
+    const baseAll = RAW.V.filter(r => r.bg === 'Entregue' && r.pt === 'N' && r.sv === 'APROVADA' && !r.aceOp && (!F.emp || r.emp === F.emp) && (!F.eq || r.eq === F.eq) && (!F.uf || r.uf === F.uf));
     const card0 = el('div', { class: 'card', id: 'fila' });
     root.append(card0);
     const opcoes = (key, f) => [...groupBy(baseAll, r => f(r) || '(vazio)').entries()].sort((a, b) => b[1].length - a[1].length).map(([k, a]) => [k, a.length]);
@@ -425,7 +425,7 @@
     const contador = el('div', { class: 'count-line' }), holder = el('div');
     const bCsv = el('button', { class: 'btn' }, 'Baixar lista (CSV)'), bMail = el('button', { class: 'btn primary', hidden: !podeEditar() }, 'Gerar mailing para o discador');
     const msg = el('span', { class: 'msg' });
-    card0.append(el('h2', { text: 'Fila de retargeting' }), el('p', { class: 'note', text: 'Pedidos entregues com portabilidade não concluída, pelo relatório de vendas mais recente. Ignora os filtros de mês e período do topo; usa empresa, equipe e UF. Os filtros abaixo ficam guardados no seu navegador.' }),
+    card0.append(el('h2', { text: 'Fila de retargeting' }), el('p', { class: 'note', text: 'Vendas aprovadas, entregues, com portabilidade não concluída e sem aceite de voz, pelo relatório de vendas mais recente. Ignora os filtros de mês e período do topo; usa empresa, equipe e UF. Os filtros abaixo ficam guardados no seu navegador.' }),
       fbox, el('div', { class: 'toolbar' }, contador, bCsv, bMail, podeEditar() ? arqInfo(msg) : null, msg), holder);
     let lista = [];
     function aplica() {
@@ -543,7 +543,7 @@
   }
   function emRota(root) {
     const base = RAW.V.filter(r => r.sv === 'APROVADA' && !r.con && PROC.emRotaStatus(r.bs) && (!F.emp || r.emp === F.emp) && (!F.eq || r.eq === F.eq) && (!F.uf || r.uf === F.uf));
-    base.forEach(r => { r._trat = PROC.tratativa(r.bs); r._atr = r.sep === 'Com atraso' ? 'Com atraso' : 'Em dia'; r._dias = r.dmax ? HOJE - dn(r.dmax) : null; });
+    base.forEach(r => { r._trat = PROC.tratativa(r.bs, r.fl); r._atr = r.sep === 'Com atraso' ? 'Com atraso' : 'Em dia'; r._dias = r.dmax ? HOJE - dn(r.dmax) : null; });
     const fin = RAW.V.filter(r => r.sv === 'APROVADA' && !r.con && PROC.entregaCancelada(r.bs) && (!F.emp || r.emp === F.emp));
     const hold = el('div');
     const bExp = el('button', { class: 'btn primary', hidden: !podeEditar() }, 'Exportar planilha Rota'); const msg = el('span', { class: 'msg' });
@@ -568,7 +568,7 @@
     const t2 = table(colsT, pz, { total: totT, maxh: 'none' });
     const t3 = table(colsT, st.map(s => ({ k: s.k, a: s.a, sem: count(s.a, r => r._trat === 'Sem tratativa'), atn: count(s.a, r => r._trat === 'Tratativa ATN'), tot: s.tot })), { total: totT, maxh: 'none' });
     // 3) data máxima x forma de entrega (atraso | em dia), mapa de calor
-    const formas = ['Bluechip Correios', 'Bluechip LOGGI', 'Carteiro Amigo', 'Eu Entrego', 'Motoboy', 'TEX Courier', 'Wareclouds', 'Outros', '(sem CD)'].filter(f => base.some(r => r.forma === f));
+    const formas = ['Bluechip Correios', 'Bluechip LOGGI', 'Carteiro Amigo', 'Eu Entrego', 'Motoboy', 'Stone', 'Wareclouds', 'Outros', '(sem CD)'].filter(f => base.some(r => r.forma === f));
     const datas = [...new Set(base.map(r => r.dmax || '(sem data)'))].sort().reverse();
     const cols3 = [{ t: 'Data máxima', k: 'd', l: true }]; const groups = [{ t: '', span: 1 }];
     let maxA = 1, maxD = 1;
@@ -601,7 +601,7 @@
     msg.textContent = 'Montando a planilha…';
     const { head, rows } = await lerCelulas(f);
     const I = n => idx(head, n);
-    const iBS = I('Bluechip Status'), iSV = I('Status venda'), iCon = I('Conectada'), iPl = I('Plataforma'), iEq = I('Nome Equipe'), iCD = I('CD Bluechip'), iDM = idx(head, 'Data Maxima Prevista Entrega', 'Data Maxima'), iSEP = I('Status Entrega Prevista');
+    const iFl = I('Flag'), iBS = I('Bluechip Status'), iSV = I('Status venda'), iCon = I('Conectada'), iPl = I('Plataforma'), iEq = I('Nome Equipe'), iCD = I('CD Bluechip'), iDM = idx(head, 'Data Maxima Prevista Entrega', 'Data Maxima'), iSEP = I('Status Entrega Prevista');
     if (iBS < 0 || iSV < 0) { ARQ = null; msg.className = 'msg err'; msg.textContent = `"${f.name}" não é o relatório de vendas.`; return; }
     const v = (r, i) => i < 0 || !r[i] ? null : r[i].v;
     const hoje = dn(isoLocal(new Date()));
@@ -610,11 +610,11 @@
     const aprovNaoCon = r => String(v(r, iSV) || '').trim().toUpperCase() === 'APROVADA' && PROC.norm(v(r, iCon) || '') !== 'CONECTADA';
     const head2 = []; head.forEach((h, i) => { if (i === iDM) { head2.push('Data Maxima', 'Dias em atraso'); return; } head2.push(h); if (i === iBS) head2.push('Tratativa'); if (i === iCD) head2.push('Forma de Entrega'); });
     const S = x => ({ t: 's', v: x });
-    const linha = r => { const out = []; const dm = PROC.toDay(v(r, iDM)); head.forEach((h, i) => { if (i === iDM) { out.push(dm ? { t: 'n', v: dn(dm) + 25569, z: 'dd/mm/yyyy' } : null, dm ? { t: 'n', v: hoje - dn(dm) } : null); return; } out.push(r[i]); if (i === iBS) out.push(S(PROC.tratativa(v(r, iBS)))); if (i === iCD) out.push(S(PROC.formaEntrega(v(r, iCD)))); }); return out; };
+    const linha = r => { const out = []; const dm = PROC.toDay(v(r, iDM)); head.forEach((h, i) => { if (i === iDM) { out.push(dm ? { t: 'n', v: dn(dm) + 25569, z: 'dd/mm/yyyy' } : null, dm ? { t: 'n', v: hoje - dn(dm) } : null); return; } out.push(r[i]); if (i === iBS) out.push(S(PROC.tratativa(v(r, iBS), v(r, iFl)))); if (i === iCD) out.push(S(PROC.formaEntrega(v(r, iCD)))); }); return out; };
     const rota = rows.filter(r => okEmp(r) && aprovNaoCon(r) && PROC.emRotaStatus(v(r, iBS)));
     const canceladas = rows.filter(r => okEmp(r) && aprovNaoCon(r) && PROC.entregaCancelada(v(r, iBS)));
     // campos de cada pedido em rota
-    const R = rota.map(r => ({ st: String(v(r, iBS)).trim(), atr: String(v(r, iSEP) || '').trim() === 'Com atraso' ? 'Com atraso' : 'Em dia', trat: PROC.tratativa(v(r, iBS)), forma: PROC.formaEntrega(v(r, iCD)), dm: PROC.toDay(v(r, iDM)) }));
+    const R = rota.map(r => ({ st: String(v(r, iBS)).trim(), atr: String(v(r, iSEP) || '').trim() === 'Com atraso' ? 'Com atraso' : 'Em dia', trat: PROC.tratativa(v(r, iBS), v(r, iFl)), forma: PROC.formaEntrega(v(r, iCD)), dm: PROC.toDay(v(r, iDM)) }));
     const N = x => x ? { t: 'n', v: x } : null;
     const cnt = f => R.filter(f).length;
     const status = [...new Set(R.map(x => x.st))].sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
@@ -628,7 +628,7 @@
     const p3 = [[S('Em rota'), S('Sem tratativa'), S('Tratativa ATN'), S('Total Geral')], [S('Com atraso'), ...tt(x => x.atr === 'Com atraso')], [S('Em dia'), ...tt(x => x.atr === 'Em dia')], totT, [],
       [S('Contagem de Bluechip Status'), S('Rótulos de Coluna')], [S('Em rota'), S('Sem tratativa'), S('Tratativa ATN'), S('Total Geral')], ...status.map(st => [S(st), ...tt(x => x.st === st)]), totT];
     // Planilha5: data máxima x forma de entrega (com atraso | em dia)
-    const ORD = ['Bluechip Correios', 'Bluechip LOGGI', 'Carteiro Amigo', 'Eu Entrego', 'Motoboy', 'TEX Courier', 'Wareclouds', 'Outros', '(sem CD)'];
+    const ORD = ['Bluechip Correios', 'Bluechip LOGGI', 'Carteiro Amigo', 'Eu Entrego', 'Motoboy', 'Stone', 'Wareclouds', 'Outros', '(sem CD)'];
     const grupos = ['Com atraso', 'Em dia'].map(g => ({ g, formas: ORD.filter(fo => R.some(x => x.atr === g && x.forma === fo)) }));
     const l1 = [S('Contagem de Data Maxima'), S('Rótulos de Coluna')], l2 = [null], l3 = [S('Em rota')];
     grupos.forEach(({ g, formas }) => { formas.forEach((fo, i) => { l2.push(i === 0 ? S(g) : null); l3.push(S(fo)); }); l2.push(S(g + ' Total')); l3.push(null); });
@@ -670,7 +670,8 @@
 
   function rankingAceite(root) {
     const base = RAW.V.filter(r => r.aceOp && r.dacet && (!F.emp || r.emp === F.emp));
-    const bh = baseHora(); const hoje = isoLocal(bh), ontem = nd(dn(hoje) - 1), hm = hmLocal(bh);
+    const bh = baseHora(); const hoje = isoLocal(bh), hm = hmLocal(bh);
+    const ontem = base.reduce((m, r) => { const d = r.dacet.slice(0, 10); return d < hoje && d > m ? d : m; }, '') || nd(dn(hoje) - 1); // último dia com marcação antes de hoje
     const mes = F.mes || hoje.slice(0, 7);
     const dia = r => r.dacet.slice(0, 10), hora = r => r.dacet.slice(11, 16);
     const hojeAte = base.filter(r => dia(r) === hoje && hora(r) <= hm), ontemAte = base.filter(r => dia(r) === ontem && hora(r) <= hm), ontemTot = base.filter(r => dia(r) === ontem);
@@ -678,28 +679,28 @@
     const ce = (a, e) => e === 'Total' ? a.length : count(a, r => r.emp === e);
     const tl = el('div', { class: 'tiles' });
     const tileX = (k, a, sub) => el('div', { class: 'tile hl' }, el('span', { class: 'k', text: k }), el('div', { class: 'pair' }, ems.map(e => el('div', { class: 'emp' }, el('span', { class: 'v c-' + e.toLowerCase() }, fI(ce(a, e)), el('small', { text: e })), sub ? el('span', { class: 'sub' }, sub(e)) : null))));
-    tl.append(tileX(`Hoje (${fD(hoje)}) até ${hm}`, hojeAte, e => { const o = ce(ontemAte, e), h = ce(hojeAte, e); const d = h - o; return [`ontem até ${hm}: `, el('b', { text: fI(o) }), ` (${d >= 0 ? '+' : ''}${fI(d)})`]; }));
-    tl.append(tileX(`Ontem (${fD(ontem)}), dia fechado`, ontemTot));
+    tl.append(tileX(`Hoje (${fD(hoje)}) até ${hm}`, hojeAte, e => { const o = ce(ontemAte, e), h = ce(hojeAte, e); const d = h - o; return [`${fD(ontem)} até ${hm}: `, el('b', { text: fI(o) }), ` (${d >= 0 ? '+' : ''}${fI(d)})`]; }));
+    tl.append(tileX(`Dia anterior (${DSEM[diaSem(ontem)]} ${fD(ontem)}), dia fechado`, ontemTot));
     const doMes = base.filter(r => dia(r).slice(0, 7) === mes);
     const diasEquipe = new Set(doMes.map(dia)).size || 1;
     tl.append(tileX(`Acumulado de ${mesNome(mes)}`, doMes, e => ['média por dia: ', el('b', { text: fI(ce(doMes, e) / diasEquipe) })]));
     const ops = [...new Set(base.filter(r => dia(r).slice(0, 7) === mes || dia(r) === hoje || dia(r) === ontem).map(r => r.aceOp))];
     const dias = [...new Set(doMes.map(dia))].sort();
     let diaADia = LS.get('diaADia', false);
-    const rows = ops.map(op => { const a = base.filter(r => r.aceOp === op); const am = a.filter(r => dia(r).slice(0, 7) === mes); const o = { op, hoje: count(a, r => dia(r) === hoje), ontem: count(a, r => dia(r) === ontem), tot: am.length, med: am.length / diasEquipe, pc: pct(count(am, r => r.pt === 'C'), am.length) }; dias.forEach(d => o['d' + d] = count(am, r => dia(r) === d) || null); return o; });
+    const rows = ops.filter(op => base.some(r => r.aceOp === op && dia(r) === hoje)).map(op => { const a = base.filter(r => r.aceOp === op); const am = a.filter(r => dia(r).slice(0, 7) === mes); const o = { op, hoje: count(a, r => dia(r) === hoje), ontem: count(a, r => dia(r) === ontem), tot: am.length, med: am.length / diasEquipe, pc: pct(count(am, r => r.pt === 'C'), am.length) }; dias.forEach(d => o['d' + d] = count(am, r => dia(r) === d) || null); return o; });
     const maxD = Math.max(1, ...rows.flatMap(r => dias.map(d => r['d' + d] || 0)));
     const holder = el('div');
     const draw = () => {
-      const cols = [{ t: 'Operador', k: 'op', l: true }, { t: 'Hoje', k: 'hoje', f: fI }, { t: 'Ontem', k: 'ontem', f: fI }, { t: 'Total do mês', k: 'tot', f: fI }, { t: 'Média/dia', k: 'med', f: fI }, { t: '% port. concluída', k: 'pc', f: fP, cls: clsConc }];
+      const cols = [{ t: 'BKO', k: 'op', l: true }, { t: 'Hoje', k: 'hoje', f: fI }, { t: `Dia anterior (${fD(ontem)})`, k: 'ontem', f: fI }, { t: 'Total do mês', k: 'tot', f: fI }, { t: 'Média/dia', k: 'med', f: fI }, { t: '% port. concluída', k: 'pc', f: fP, cls: clsConc }];
       if (diaADia) dias.forEach(d => cols.push({ t: fD(d), k: 'd' + d, f: fI, style: v => v ? `background: color-mix(in srgb, var(--s-conc) ${Math.round(8 + 50 * v / maxD)}%, transparent)` : '' }));
-      const tot = { op: 'Total', hoje: hojeAte.length ? count(base, r => dia(r) === hoje) : 0, ontem: ontemTot.length, tot: doMes.length, med: doMes.length / diasEquipe, pc: pct(count(doMes, r => r.pt === 'C'), doMes.length) }; dias.forEach(d => tot['d' + d] = count(doMes, r => dia(r) === d));
+      const tot = { op: 'Total da equipe', hoje: count(base, r => dia(r) === hoje), ontem: ontemTot.length, tot: doMes.length, med: doMes.length / diasEquipe, pc: pct(count(doMes, r => r.pt === 'C'), doMes.length) }; dias.forEach(d => tot['d' + d] = count(doMes, r => dia(r) === d));
       holder.replaceChildren(table(cols, rows, { sortable: true, sortKey: 'hoje', total: tot, maxh: 'none' }));
     };
     const bDia = el('button', { class: 'btn small', onclick: () => { diaADia = !diaADia; LS.set('diaADia', diaADia); bDia.textContent = diaADia ? 'Esconder dia a dia' : 'Ver dia a dia'; draw(); } }, diaADia ? 'Esconder dia a dia' : 'Ver dia a dia');
     draw();
     root.append(el('h2', { class: 'sec-title', text: 'Ranking de aceite de voz' }),
-      el('p', { class: 'lead', text: `Marcações de aceite de voz por operador, pela data da marcação. Base de vendas de ${fDT(bh)}. "Hoje" conta as marcações até ${hm}.` }), tl,
-      el('div', { class: 'card' }, el('div', { class: 'row1' }, el('h2', { text: 'Marcações por operador' }), bDia), holder));
+      el('p', { class: 'lead', text: `Marcações de aceite de voz por BKO, pela data da marcação. Base de vendas de ${fDT(bh)}. "Hoje" conta as marcações até ${hm}. "Dia anterior" é o último dia com marcação. A tabela mostra só quem teve aceite hoje.` }), tl,
+      el('div', { class: 'card' }, el('div', { class: 'row1' }, el('h2', { text: 'Marcações por BKO' }), bDia), holder));
   }
   function mailingAceite(root) {
     const bh = baseHora(); const limite = new Date(bh.getTime() - 24 * 3600 * 1000);
@@ -811,12 +812,12 @@
     const perEmp = fn => empsShown().map(e => `${e} ${fn(e)}`).join(' · ');
     if (RAW.V) {
       const V = filt(RAW.V, 'dv');
-      const rt = RAW.V.filter(r => r.bg === 'Entregue' && r.pt === 'N' && (!F.emp || r.emp === F.emp));
+      const rt = RAW.V.filter(r => r.bg === 'Entregue' && r.pt === 'N' && r.sv === 'APROVADA' && !r.aceOp && (!F.emp || r.emp === F.emp));
       out.push({ sev: 'bad', t: 'Fila de retargeting', big: fI(rt.length) + ' pedidos', p: `Entregues com portabilidade não concluída (${perEmp(e => fI(count(rt, r => r.emp === e)))}).`, a: 'Filtrar na aba Portabilidade e gerar o mailing BKO_TIM_POS_VENDA_retargeting.' });
       const env = V.filter(r => r.bg !== 'Não enviado'), ins = env.filter(r => r.bg === 'Insucesso');
       out.push({ sev: pct(ins.length, env.length) > .1 ? 'bad' : 'warn', t: 'Insucesso de entrega', big: fP(pct(ins.length, env.length)) + ' dos envios', p: `Principais motivos: ${topItems(ins, r => r.bm || 'Sem motivo', 2).map(t => t.label).join(' e ')}.`, a: 'Validar endereço na venda e tratar os casos de Tratativa ATN da aba Entrega.' });
       const rota = RAW.V.filter(r => r.sv === 'APROVADA' && !r.con && PROC.emRotaStatus(r.bs) && (!F.emp || r.emp === F.emp));
-      out.push({ sev: 'warn', t: 'Em rota com atraso', big: fI(count(rota, r => r.sep === 'Com atraso')) + ' pedidos', p: `${fI(count(rota, r => PROC.tratativa(r.bs) === 'Tratativa ATN'))} pedidos em rota dependem de tratativa da ATN.`, a: 'Exportar a planilha Rota e cobrar as transportadoras.' });
+      out.push({ sev: 'warn', t: 'Em rota com atraso', big: fI(count(rota, r => r.sep === 'Com atraso')) + ' pedidos', p: `${fI(count(rota, r => PROC.tratativa(r.bs, r.fl) === 'Tratativa ATN'))} pedidos em rota dependem de tratativa da ATN.`, a: 'Exportar a planilha Rota e cobrar as transportadoras.' });
       const ap = V.filter(r => r.sv === 'APROVADA'), cn = ap.filter(r => r.con); const media = pct(count(cn, r => r.pt === 'C'), cn.length);
       const abaixo = [...groupBy(cn, r => r.eq).entries()].filter(([, a]) => a.length >= 50).map(([k, a]) => ({ k, v: pct(count(a, r => r.pt === 'C'), a.length) })).filter(x => x.v < media - .05).sort((a, b) => a.v - b.v);
       out.push({ sev: abaixo.length ? 'warn' : 'good', t: 'Equipes abaixo da média', big: abaixo.length + (abaixo.length === 1 ? ' equipe' : ' equipes'), p: abaixo.length ? `Portabilidade concluída entre as conectadas: média ${fP(media)}. Abaixo: ${abaixo.map(x => `${x.k} (${fP(x.v)})`).join(', ')}.` : `Nenhuma equipe 5 pontos abaixo da média (${fP(media)}).`, a: 'Comparar contato pós-venda e aceite de voz dessas equipes no ranking.' });
