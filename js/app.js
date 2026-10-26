@@ -139,9 +139,10 @@
       let efMax = ''; (RAW.EF || []).forEach(r => { if (r.de > efMax) efMax = r.de; });
       for (const r of (RAW.V || [])) {
         if (r.bg !== 'Entregue' || !r.dbs) continue;
-        const o = { p: r.p, dv: r.dv, de: r.dbs, emp: r.emp, eq: r.eq, ace: !!r.aceOp, pos: r.pos, pt: r.pt, pm: r.pm, pd: r.pd, fl: r.fl, sms: r.sms, so: r.so, pa: r.pa, chip: r.chip };
+        const o = { p: r.p, dv: r.dv, de: r.dbs, emp: r.emp, eq: r.eq, vend: r.vend, ace: !!r.aceOp, pos: r.pos, posOp: r.posOp, dpos: r.dpos, pt: r.pt, pm: r.pm, pd: r.pd, fl: r.fl, sms: r.sms, so: r.so, pa: r.pa, chip: r.chip };
         const x = em.get(r.p);
-        if (!x) { if (r.dbs.slice(0, 10) > efMax.slice(0, 10)) em.set(r.p, o); } else if (vNovo) Object.assign(x, o, { de: x.de });
+        if (!x) { if (r.dbs.slice(0, 10) > efMax.slice(0, 10)) em.set(r.p, o); }
+        else { if (r.vend) x.vend = r.vend; if (vNovo) for (const k in o) if (k !== 'de' && o[k] !== undefined) x[k] = o[k]; }
       }
       RAW.E = [...em.values()];
     } else RAW.E = null;
@@ -354,6 +355,31 @@
         { label: 'Concluídas', data: days.map(d => k(d, x => x.pt === 'C')), backgroundColor: css('--s-conc'), borderRadius: 3, maxBarThickness: 22 }] },
         options: { scales: { y: { beginAtZero: true }, x: {} }, plugins: { tooltip: { callbacks: { afterBody: it => { const d = days[it[0].dataIndex]; return '% concluída: ' + fP(pct(k(d, x => x.pt === 'C'), n(d))); } } } } } });
     }
+    contatoTempo(root, E);
+  }
+
+  /* --- Tempo da entrega até o contato (pós-venda) --- */
+  const fPP = v => v == null || isNaN(v) ? '–' : (v > 0 ? '+' : '') + (v * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' p.p.';
+  const diasContato = r => r.pos && r.dpos ? dn(r.dpos) - dn(r.de) : null;
+  const FX_CONT = [['Antes da entrega', r => r.pos && r._dc != null && r._dc < 0], ['D0 (dia da entrega)', r => r._dc === 0], ['D+1', r => r._dc === 1], ['D+2 a D+3', r => r._dc >= 2 && r._dc <= 3], ['D+4 ou mais', r => r._dc >= 4], ['Contato sem data', r => r.pos && r._dc == null], ['Sem contato', r => !r.pos]];
+  function contatoTempo(root, E) {
+    root.append(el('h2', { class: 'sec-title', text: 'Tempo até o contato' }),
+      el('p', { class: 'lead', text: 'Dias entre a entrega e o registro do pós-venda (data do pós-venda). "Até D+1" conta só as entregas que já têm 2 dias ou mais, para os últimos dias não puxarem o % para baixo. "Antes da entrega" = pós-venda registrado antes do chip chegar.' }));
+    if (!E.some(r => r.dpos)) { root.append(el('p', { class: 'note', text: 'A data do pós-venda entra a partir do próximo envio do relatório de entregas ou de vendas.' })); return; }
+    E.forEach(r => { r._dc = diasContato(r); });
+    const be = byEmp(E), ok2 = r => REF_E - dn(r.de) >= 3;
+    const tl = el('div', { class: 'tiles' });
+    tl.append(tileEmp('Contato até D+1', e => { const b = be[e].filter(ok2), c = count(b, r => r._dc != null && r._dc <= 1); return { v: fP(pct(c, b.length)), sub: [el('b', { text: fI(c) }), ` de ${fI(b.length)} entregas`] }; }, true));
+    tl.append(tileEmp('Contato no D0', e => { const b = be[e].filter(r => REF_E - dn(r.de) >= 2), c = count(b, r => r._dc != null && r._dc <= 0); return { v: fP(pct(c, b.length)), sub: [el('b', { text: fI(c) }), ' no dia da entrega ou antes'] }; }));
+    tl.append(tileEmp('Contato antes da entrega', e => { const c = count(be[e], r => r._dc != null && r._dc < 0); return { v: fP(pct(c, be[e].length)), sub: [el('b', { text: fI(c) }), ' com o chip ainda em rota'] }; }));
+    tl.append(tileEmp('Sem contato há mais de 3 dias', e => { const a = be[e].filter(r => !r.pos && r.pt !== 'C' && REF_E - 1 - dn(r.de) > 3); return { v: fI(a.length), sub: 'entregues, sem pós-venda e sem portin' }; }));
+    root.append(tl);
+    const rows = FX_CONT.map(([k, f]) => { const o = { k }; empsShown().forEach(e => { const a = be[e].filter(f); o[e + 'n'] = a.length; o[e + 'p'] = pct(a.length, be[e].length); o[e + 'c'] = a.length ? pct(count(a, r => r.pt === 'C'), a.length) : null; }); return o; }).filter(o => empsShown().some(e => o[e + 'n']));
+    const cols = [{ t: 'Quando foi o contato', k: 'k', l: true }, ...empsShown().flatMap(e => [{ t: e + ' entregas', k: e + 'n', f: fI }, { t: '% das entregas', k: e + 'p', f: fP }, { t: '% concluída', k: e + 'c', f: fP, cls: clsConc }])];
+    const bko = [...groupBy(E.filter(r => r.posOp && r._dc != null), r => r.posOp).entries()].map(([k, a]) => ({ k, n: a.length, d1: pct(count(a, r => r._dc <= 1), a.length), ant: pct(count(a, r => r._dc < 0), a.length), c: pct(count(a, r => r.pt === 'C'), a.length) })).filter(r => r.n >= 5);
+    root.append(el('div', { class: 'grid' },
+      card('Conclusão pelo momento do contato', 'Quanto mais cedo o contato, maior a conclusão da portabilidade.', table(cols, rows, { maxh: 'none' })),
+      card('Contato por BKO', 'Pós-vendas registrados por BKO nas entregas do filtro (5 ou mais).', table([{ t: 'BKO', k: 'k', l: true }, { t: 'Contatos', k: 'n', f: fI }, { t: '% até D+1', k: 'd1', f: fP, cls: v => v == null ? '' : v >= .7 ? 'good' : v < .5 ? 'bad' : 'warn' }, { t: '% antes da entrega', k: 'ant', f: fP }, { t: '% concluída', k: 'c', f: fP, cls: clsConc }], bko, { sortable: true, sortKey: 'n', maxh: '420px' }))));
   }
 
   /* ================= Portabilidade ================= */
@@ -376,9 +402,61 @@
       chart(c2, { type: 'bar', data: { labels: Ns.slice(0, 11).map(n => n ? 'D+' + n : 'D0'), datasets: empsShown().map(e => ({ label: e, data: Ns.slice(0, 11).map(n => chance(be[e], n)), backgroundColor: colEmp(e), borderRadius: 4, maxBarThickness: 24 })) }, options: { scales: { y: pctAxis(), x: {} }, plugins: { tooltip: pctTip } } });
       root.append(el('div', { class: 'grid' }, card('Motivos de não conclusão', '% das não concluídas de cada empresa.', legendEl(), hbars(topItems(E.filter(r => r.pt === 'N'), r => r.pm || 'Sem motivo informado', 12), empsShown(), fP)),
         card('Status da ordem dos pedidos não concluídos ou pendentes', null, legendEl(), hbars(topItems(E.filter(r => r.pt !== 'C'), r => r.so || 'Sem status de ordem', 10), empsShown(), fP))));
+      smsPrevio(root, E);
+      agingFila(root, E);
     }
     if (RAW.V) filaRetargeting(root); else semBase('vendas', root);
     historicoMailings(root);
+  }
+
+  /* --- SMS prévio x conclusão --- */
+  const temSms = r => String(r.sms || '').trim().toUpperCase() === 'SIM';
+  function smsPrevio(root, E) {
+    const B = E.filter(r => r.obs >= 11);
+    root.append(el('h2', { class: 'sec-title', text: 'SMS prévio × conclusão da portabilidade' }),
+      el('p', { class: 'lead', text: 'Compara a conclusão de quem respondeu o SMS prévio na venda com a de quem não respondeu. Base: entregas com 11 dias ou mais, quando a conclusão já está praticamente definida.' }));
+    if (!B.length) { root.append(el('p', { class: 'note', text: 'Ainda não há entregas com 11 dias ou mais no filtro.' })); return; }
+    const be = byEmp(B), cc = a => pct(count(a, r => r.pt === 'C'), a.length);
+    const tl = el('div', { class: 'tiles' });
+    tl.append(tileEmp('Concluída com SMS prévio', e => { const a = be[e].filter(temSms); return { v: fP(cc(a)), sub: [el('b', { text: fI(count(a, r => r.pt === 'C')) }), ` de ${fI(a.length)} entregas`] }; }, true));
+    tl.append(tileEmp('Concluída sem SMS prévio', e => { const a = be[e].filter(r => !temSms(r)); return { v: fP(cc(a)), sub: [el('b', { text: fI(count(a, r => r.pt === 'C')) }), ` de ${fI(a.length)} entregas`] }; }));
+    tl.append(tileEmp('Diferença', e => ({ v: fPP(cc(be[e].filter(temSms)) - cc(be[e].filter(r => !temSms(r)))), sub: 'com SMS prévio menos sem' }), true));
+    tl.append(tileEmp('Entregas com SMS prévio', e => ({ v: fP(pct(count(be[e], temSms), be[e].length)), sub: [el('b', { text: fI(count(be[e], temSms)) }), ' entregas'] })));
+    root.append(tl);
+    const linha = (k, a, extra) => { const s = a.filter(temSms), n = a.filter(r => !temSms(r)); const cs = cc(s), cn = cc(n); return Object.assign({ k, n: a.length, ps: pct(s.length, a.length), cs, cn, dif: cs != null && cn != null ? cs - cn : null }, extra); };
+    const colsBase = [{ t: 'Entregas', k: 'n', f: fI }, { t: '% com SMS prévio', k: 'ps', f: fP }, { t: '% concluída com SMS', k: 'cs', f: fP, cls: clsConc }, { t: '% concluída sem SMS', k: 'cn', f: fP, cls: clsConc }, { t: 'Diferença', k: 'dif', f: fPP }];
+    const eq = [...groupBy(B, r => r.eq || '(sem equipe)').entries()].filter(([, a]) => a.length >= 30).map(([k, a]) => linha(k, a, { emp: a[0].emp }));
+    const vd = [...groupBy(B.filter(r => r.vend), r => r.vend).entries()].filter(([, a]) => a.length >= 15).map(([k, a]) => linha(k, a, { emp: a[0].emp, eq: a[0].eq }));
+    const [b1, c1] = box();
+    root.append(el('div', { class: 'grid' },
+      card('% concluída com e sem SMS prévio', null, b1),
+      card('Por equipe', 'Equipes com 30 entregas ou mais.', table([{ t: 'Equipe', k: 'k', l: true }, { t: 'Empresa', k: 'emp', l: true, render: v => empPill(v) }, ...colsBase], eq, { sortable: true, sortKey: 'ps', maxh: '360px' }))));
+    root.append(card('Por vendedor', 'Vendedores com 15 entregas ou mais. % com SMS prévio mostra quanto o vendedor consegue a resposta na venda.', table([{ t: 'Vendedor', k: 'k', l: true }, { t: 'Empresa', k: 'emp', l: true, render: v => empPill(v) }, { t: 'Equipe', k: 'eq', l: true }, ...colsBase], vd, { sortable: true, sortKey: 'ps', maxh: '460px' })));
+    chart(c1, { type: 'bar', data: { labels: empsShown(), datasets: [
+      { label: 'Com SMS prévio', data: empsShown().map(e => cc(be[e].filter(temSms))), backgroundColor: css('--s-conc'), borderRadius: 4, maxBarThickness: 48 },
+      { label: 'Sem SMS prévio', data: empsShown().map(e => cc(be[e].filter(r => !temSms(r)))), backgroundColor: css('--s-cont'), borderRadius: 4, maxBarThickness: 48 }] },
+      options: { scales: { y: pctAxis(1), x: {} }, plugins: { tooltip: pctTip } } });
+  }
+
+  /* --- Aging da fila em aberto --- */
+  const FX_AGING = [['0 a 3 dias', d => d <= 3], ['4 a 6 dias', d => d >= 4 && d <= 6], ['7 a 10 dias', d => d >= 7 && d <= 10], ['11 a 15 dias', d => d >= 11 && d <= 15], ['16 a 30 dias', d => d >= 16 && d <= 30], ['Mais de 30 dias', d => d > 30]];
+  function agingFila(root, E) {
+    const A = E.filter(r => r.pt === 'N' || r.pt === 'P'); A.forEach(r => { r._ag = REF_E - 1 - dn(r.de); });
+    root.append(el('h2', { class: 'sec-title', text: 'Aging da fila em aberto' }),
+      el('p', { class: 'lead', text: `Pedidos entregues sem portabilidade concluída (pendente ou não concluída), por dias desde a entrega até ${fD(nd(REF_E - 1))}. Depois de uns 10 dias a chance de concluir cai muito (veja a curva acima): esses viram retargeting.` }));
+    const be = byEmp(A), bt = byEmp(E);
+    const tl = el('div', { class: 'tiles' });
+    tl.append(tileEmp('Em aberto', e => ({ v: fI(be[e].length), sub: [el('b', { text: fP(pct(be[e].length, bt[e].length)) }), ' das entregas'] })));
+    tl.append(tileEmp('Em aberto até 6 dias', e => ({ v: fI(count(be[e], r => r._ag <= 6)), sub: 'ainda no prazo de concluir' }), true));
+    tl.append(tileEmp('Em aberto com mais de 10 dias', e => ({ v: fI(count(be[e], r => r._ag > 10)), sub: [el('b', { text: fP(pct(count(be[e], r => r._ag > 10), be[e].length)) }), ' do aberto'] })));
+    tl.append(tileEmp('Em aberto sem contato', e => ({ v: fI(count(be[e], r => !r.pos)), sub: [el('b', { text: fI(count(be[e], r => !r.pos && r._ag <= 6)) }), ' com até 6 dias'] })));
+    root.append(tl);
+    const rows = FX_AGING.map(([k, f]) => { const o = { k }; empsShown().forEach(e => { const a = be[e].filter(r => f(r._ag)); o[e + 'n'] = a.length; o[e + 'p'] = count(a, r => r.pt === 'P'); o[e + 'x'] = count(a, r => r.pt === 'N'); o[e + 's'] = count(a, r => !r.pos); o[e + 'a'] = count(a, r => !r.ace); }); return o; });
+    const tot = { k: 'Total' }; empsShown().forEach(e => ['n', 'p', 'x', 's', 'a'].forEach(c => tot[e + c] = rows.reduce((s, r) => s + r[e + c], 0)));
+    const cols = [{ t: 'Dias desde a entrega', k: 'k', l: true }, ...empsShown().flatMap(e => [{ t: e + ' em aberto', k: e + 'n', f: fI }, { t: 'Pendente', k: e + 'p', f: fI }, { t: 'Não concluída', k: e + 'x', f: fI }, { t: 'Sem contato', k: e + 's', f: fI }, { t: 'Sem aceite', k: e + 'a', f: fI }])];
+    const [b1, c1] = box();
+    root.append(el('div', { class: 'grid' }, card('Em aberto por faixa de dias', null, table(cols, rows, { total: tot, maxh: 'none' })), card('Em aberto por faixa de dias', 'Quantidade de pedidos.', b1)));
+    chart(c1, { type: 'bar', data: { labels: FX_AGING.map(x => x[0]), datasets: empsShown().map(e => ({ label: e, data: rows.map(r => r[e + 'n']), backgroundColor: colEmp(e), borderRadius: 4, maxBarThickness: 32 })) }, options: { scales: { y: { beginAtZero: true }, x: {} } } });
   }
 
   /* --- Vendas reprocessadas (reativação após a entrega) --- */
@@ -537,7 +615,20 @@
     if (error) { holder.replaceChildren(el('p', { class: 'msg err', text: error.message })); return; }
     if (!data.length) { holder.replaceChildren(el('p', { class: 'note', text: 'Nenhum mailing gerado ainda.' })); return; }
     const msg = el('span', { class: 'msg' });
-    holder.replaceChildren(msg, table([{ t: 'Gerado em', k: 'gerado_em', l: true, f: v => fDT(v) }, { t: 'Tipo', k: 'tipo', l: true }, { t: 'Arquivo', k: 'arquivo', l: true }, { t: 'Pedidos', k: 'qtd', f: fI }, { t: 'ATN', k: 'qtd_atn', f: fI }, { t: 'DAHA', k: 'qtd_daha', f: fI },
+    // resultado de cada mailing: retargeting = portin concluída depois do envio; aceite = aceite de voz marcado depois do envio
+    const vm = new Map((RAW.V || []).map(r => [r.p, r]));
+    for (const m of data) {
+      const g = new Date(m.gerado_em), gd = isoLocal(g), gdt = `${gd} ${hmLocal(g)}`, ps = m.propostas || [];
+      const ace = /aceite/i.test(m.tipo); let ok = 0, d3 = 0, d7 = 0;
+      for (const p of ps) { const r = vm.get(p); if (!r) continue;
+        let d = null;
+        if (ace) { if (r.aceOp && r.dacet && r.dacet >= gdt) d = dn(r.dacet) - dn(gd); }
+        else if (r.pt === 'C' && r.pd && r.pd >= gd) d = dn(r.pd) - dn(gd);
+        if (d != null) { ok++; if (d <= 3) d3++; if (d <= 7) d7++; } }
+      Object.assign(m, { res: ace ? 'Aceite de voz' : 'Portin concluída', ok, pok: pct(ok, ps.length), p3: pct(d3, ps.length), p7: pct(d7, ps.length), dias: HOJE - dn(gd) });
+    }
+    holder.replaceChildren(el('p', { class: 'note', text: 'Resultado: no retargeting, pedidos que concluíram a portabilidade depois do envio; no aceite, pedidos que tiveram o aceite de voz marcado depois do envio. Conferido no último relatório de vendas.' }), msg, table([{ t: 'Gerado em', k: 'gerado_em', l: true, render: v => fDT(v) }, { t: 'Tipo', k: 'tipo', l: true }, { t: 'Pedidos', k: 'qtd', f: fI }, { t: 'ATN', k: 'qtd_atn', f: fI }, { t: 'DAHA', k: 'qtd_daha', f: fI },
+      { t: 'Resultado', k: 'res', l: true }, { t: 'Converteram', k: 'ok', f: fI }, { t: '% total', k: 'pok', f: fP }, { t: '% até 3 dias', k: 'p3', f: fP }, { t: '% até 7 dias', k: 'p7', f: fP }, { t: 'Dias desde o envio', k: 'dias', f: fI },
       { t: '', k: 'id', render: (v, r) => podeEditar() ? el('button', { class: 'btn small', onclick: () => gerarMailing(r.tipo, r.propostas || [], { msg, filtros: { refeito_de: r.id } }) }, 'Gerar de novo') : '' }], data, { maxh: '320px' }));
   }
 
@@ -564,6 +655,30 @@
     const dimTable = (key, label, min) => { const rows = [...groupBy(env, r => r[key] || '(não informado)').entries()].filter(([, a]) => a.length >= min).map(([k, a]) => { const fin = a.filter(x => /^Finalizado/.test(x.sep || '')); return { k, n: a.length, ent: pct(count(a, x => x.bg === 'Entregue'), a.length), ins: pct(count(a, x => x.bg === 'Insucesso'), a.length), atr: pct(count(fin, x => /atraso/i.test(x.sep)), fin.length), med: median(a.filter(x => x.dEnt != null).map(x => x.dEnt)) }; });
       return table([{ t: label, k: 'k', l: true }, { t: 'Finalizadas', k: 'n', f: fI }, { t: '% entregue', k: 'ent', f: fP }, { t: '% insucesso', k: 'ins', f: fP, cls: v => v >= .15 ? 'bad' : v >= .1 ? 'warn' : '' }, { t: '% com atraso', k: 'atr', f: fP, cls: v => v >= .5 ? 'bad' : v >= .35 ? 'warn' : '' }, { t: 'Mediana dias', k: 'med', f: fI }], rows, { sortable: true, sortKey: 'ins', maxh: '420px' }); };
     root.append(el('div', { class: 'grid' }, card('Insucesso por centro de distribuição', 'CDs com 30 finalizadas ou mais.', dimTable('cd', 'CD', 30)), card('Insucesso por UF', 'UFs com 30 finalizadas ou mais.', dimTable('uf', 'UF', 30))));
+    recuperacaoInsucesso(root);
+  }
+
+  /* --- Recuperação do insucesso (reenvio) --- */
+  const ST_REENV = [['Entregue', r => r.bg === 'Entregue'], ['Em trânsito', r => r.bg === 'Em trânsito'], ['Insucesso de novo', r => r.bg === 'Insucesso'], ['Ainda não enviado', r => r.bg === 'Não enviado']];
+  function recuperacaoInsucesso(root) {
+    const V = filt(RAW.V, 'dv');
+    const R = V.filter(r => r.qr >= 2), S = V.filter(r => r.bg === 'Insucesso' && !(r.qr >= 2));
+    root.append(el('h2', { class: 'sec-title', text: 'Recuperação do insucesso' }),
+      el('p', { class: 'lead', text: 'Reenviado = pedido com 2 remessas ou mais na Bluechip (coluna Qtd remessas do relatório de vendas). Pela data da venda. Mostra quanto do insucesso volta a ser entregue e conclui a portabilidade.' }));
+    const bR = byEmp(R), bS = byEmp(S);
+    const tl = el('div', { class: 'tiles' });
+    tl.append(tileEmp('Reenviados', e => ({ v: fI(bR[e].length), sub: [el('b', { text: fP(pct(bR[e].length, bR[e].length + bS[e].length)) }), ' dos pedidos com insucesso'] })));
+    tl.append(tileEmp('Entregues no reenvio', e => { const c = count(bR[e], r => r.bg === 'Entregue'); return { v: fP(pct(c, bR[e].length)), sub: [el('b', { text: fI(c) }), ' dos reenviados'] }; }, true));
+    tl.append(tileEmp('Portin concluída após o reenvio', e => { const a = bR[e].filter(r => r.bg === 'Entregue'), c = count(a, r => r.pt === 'C'); return { v: fP(pct(c, a.length)), sub: [el('b', { text: fI(c) }), ' das entregues no reenvio'] }; }, true));
+    tl.append(tileEmp('Insucesso sem reenvio', e => ({ v: fI(bS[e].length), sub: [el('b', { text: fI(count(bS[e], r => r.sv === 'APROVADA')) }), ' com a venda ainda aprovada'] })));
+    root.append(tl);
+    const rows = ST_REENV.map(([k, f]) => { const o = { k }; empsShown().forEach(e => { const a = bR[e].filter(f); o[e + 'n'] = a.length; o[e + 'p'] = pct(a.length, bR[e].length); o[e + 'c'] = a.length ? pct(count(a, r => r.pt === 'C'), a.length) : null; }); return o; });
+    const cols = [{ t: 'Situação atual do reenviado', k: 'k', l: true }, ...empsShown().flatMap(e => [{ t: e + ' pedidos', k: e + 'n', f: fI }, { t: '%', k: e + 'p', f: fP }, { t: '% portin concluída', k: e + 'c', f: fP }])];
+    const fr = [...groupBy(R, r => r.forma || '(sem CD)').entries()].map(([k, a]) => ({ k, n: a.length, ent: pct(count(a, r => r.bg === 'Entregue'), a.length), ins: pct(count(a, r => r.bg === 'Insucesso'), a.length) }));
+    root.append(el('div', { class: 'grid' },
+      card('Situação dos reenviados', null, table(cols, rows, { maxh: 'none' })),
+      card('Reenviados por forma de entrega', 'Forma de entrega da última remessa.', table([{ t: 'Forma de entrega', k: 'k', l: true }, { t: 'Reenviados', k: 'n', f: fI }, { t: '% entregue', k: 'ent', f: fP }, { t: '% insucesso de novo', k: 'ins', f: fP, cls: v => v >= .2 ? 'bad' : v >= .1 ? 'warn' : '' }], fr, { sortable: true, sortKey: 'n', maxh: '300px' }))));
+    root.append(card('Motivo do insucesso sem reenvio', '% dos insucessos sem reenvio de cada empresa. São os pedidos que ainda podem ser recuperados (ou que já foram perdidos).', legendEl(), hbars(topItems(S, r => r.bm || 'Sem motivo', 10), empsShown(), fP)));
   }
   function emRota(root) {
     const base = RAW.V.filter(r => r.sv === 'APROVADA' && !r.con && PROC.emRotaStatus(r.bs) && (!F.emp || r.emp === F.emp) && (!F.eq || r.eq === F.eq) && (!F.uf || r.uf === F.uf));
@@ -782,6 +897,29 @@
       ds.push({ label: e + ' · reativação', data: days.map(d => (g2.get(d) || []).length), backgroundColor: `color-mix(in srgb, ${colEmp(e)} 45%, transparent)`, stack: e, borderRadius: 3, maxBarThickness: 18 }); });
     chart(c1, { type: 'bar', data: { labels: days.map(fD), datasets: ds }, options: { scales: { y: { beginAtZero: true, stacked: true }, x: { stacked: true } } } });
     root.append(card('Motivos de não conclusão entre as conectadas', null, legendEl(), hbars(topItems(C.filter(r => r.pt === 'N'), r => r.pm || 'Sem motivo', 12), empsShown(), fP)));
+    conectadaSemPort(root, C);
+  }
+
+  /* --- Conectada sem portabilidade (chip ativo no número provisório) --- */
+  const FX_ATIV = [['0 a 3 dias', d => d <= 3], ['4 a 7 dias', d => d >= 4 && d <= 7], ['8 a 15 dias', d => d >= 8 && d <= 15], ['16 a 30 dias', d => d >= 16 && d <= 30], ['Mais de 30 dias', d => d > 30]];
+  function conectadaSemPort(root, C) {
+    const A = C.filter(r => r.pt === 'N' || r.pt === 'P'); A.forEach(r => { r._da = HOJE - dn(r.da); });
+    root.append(el('h2', { class: 'sec-title', text: 'Conectada sem portabilidade' }),
+      el('p', { class: 'lead', text: 'Cliente com o chip ativo e a portabilidade pendente ou não concluída: a linha fica no número provisório. É gross em risco. Dias contados da ativação até hoje.' }));
+    const be = byEmp(A), bc = byEmp(C);
+    const tl = el('div', { class: 'tiles' });
+    tl.append(tileEmp('Conectadas sem portabilidade', e => ({ v: fI(be[e].length), sub: [el('b', { text: fP(pct(be[e].length, bc[e].length)) }), ' das conectadas'] }), true));
+    tl.append(tileEmp('Pendente', e => ({ v: fI(count(be[e], r => r.pt === 'P')) })));
+    tl.append(tileEmp('Não concluída', e => ({ v: fI(count(be[e], r => r.pt === 'N')) })));
+    tl.append(tileEmp('Mediana de dias desde a ativação', e => ({ v: fI(median(be[e].map(r => r._da))) })));
+    tl.append(tileEmp('Sem pós-venda', e => ({ v: fI(count(be[e], r => !r.pos)), sub: [el('b', { text: fP(pct(count(be[e], r => !r.pos), be[e].length)) }), ' das sem portabilidade'] })));
+    root.append(tl);
+    const rows = FX_ATIV.map(([k, f]) => { const o = { k }; empsShown().forEach(e => { const a = be[e].filter(r => f(r._da)); o[e + 'n'] = a.length; o[e + 'p'] = count(a, r => r.pt === 'P'); o[e + 'x'] = count(a, r => r.pt === 'N'); o[e + 's'] = count(a, r => !r.pos); }); return o; });
+    const tot = { k: 'Total' }; empsShown().forEach(e => ['n', 'p', 'x', 's'].forEach(c => tot[e + c] = rows.reduce((s, r) => s + r[e + c], 0)));
+    const cols = [{ t: 'Dias desde a ativação', k: 'k', l: true }, ...empsShown().flatMap(e => [{ t: e + ' sem port.', k: e + 'n', f: fI }, { t: 'Pendente', k: e + 'p', f: fI }, { t: 'Não concluída', k: e + 'x', f: fI }, { t: 'Sem pós-venda', k: e + 's', f: fI }])];
+    root.append(el('div', { class: 'grid' }, card('Por faixa de dias desde a ativação', null, table(cols, rows, { total: tot, maxh: 'none' })),
+      card('Status da ordem', '% das conectadas sem portabilidade de cada empresa.', legendEl(), hbars(topItems(A, r => r.so || 'Sem status de ordem', 8), empsShown(), fP))));
+    root.append(card('Motivo informado na portabilidade', '% das conectadas sem portabilidade de cada empresa.', legendEl(), hbars(topItems(A, r => r.pm || 'Sem motivo informado', 10), empsShown(), fP)));
   }
 
   /* ================= Gross ================= */

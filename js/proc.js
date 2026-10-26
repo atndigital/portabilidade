@@ -160,7 +160,7 @@
         pa: yes(pick(r, ['PORTABILIDADE ANTECIPADA', 'PORT ANTECIPADA'])),
         sms: txt(pick(r, ['SMS PREVIO'])),
         aceOp: txt(pick(r, ['ACEITE DE VOZ'])), dacet: toDT(pick(r, ['DATA ACEITE VOZ'])),
-        pos: !!txt(pick(r, ['POS VENDA'])),
+        pos: !!txt(pick(r, ['POS VENDA'])), posOp: txt(pick(r, ['POS VENDA'])), dpos: toDay(pick(r, ['DATA POS VENDA'])),
         so: txt(pick(r, ['STATUS ORDEM', 'STATUS DA ORDEM'])), chip: txt(pick(r, ['TIPO CHIP'])),
         os1: !!os && /^1-/.test(os),
         dg: toDay(pick(r, ['MARCADO GROSS'])),
@@ -176,6 +176,7 @@
         p: txt(pick(r, ['PROPOSTA'])), dv: toDay(pick(r, ['DATA VENDA'])), de: toDay(pick(r, ['DATA ENTREGA'])),
         emp: empresa(pick(r, ['PLATAFORMA CONECTADA', 'PLATAFORMA']), eq), eq,
         ace: !!txt(pick(r, ['ACEITE DE VOZ'])), pos: !!txt(pick(r, ['POS VENDA'])),
+        posOp: txt(pick(r, ['POS VENDA'])), dpos: toDay(pick(r, ['DATA POS VENDA'])), vend: txt(pick(r, ['VENDEDOR', 'NOME VENDEDOR'])),
         pt: portab(pick(r, ['PORTABILIDADE'])), pm, pd,
         fl: txt(pick(r, ['FLAG'])), sms: txt(pick(r, ['SMS PREVIO'])), so: txt(pick(r, ['STATUS DA ORDEM', 'STATUS ORDEM'])),
         pa: yes(pick(r, ['PORT ANTECIPADA', 'PORTABILIDADE ANTECIPADA'])), chip: txt(pick(r, ['TIPO CHIP']))
@@ -221,8 +222,8 @@
   }
 
   const COLS = {
-    vendas: ['p', 'dv', 'dvt', 'emp', 'eq', 'sup', 'vend', 'uf', 'sv', 'mr', 'fl', 'con', 'dcon', 'bs', 'bg', 'bm', 'dbs', 'sep', 'cd', 'forma', 'dmax', 'qr', 'pt', 'pm', 'pd', 'pa', 'sms', 'aceOp', 'dacet', 'pos', 'so', 'chip', 'os1', 'dg', 'nt', 'abr'],
-    entregas: ['p', 'dv', 'de', 'emp', 'eq', 'ace', 'pos', 'pt', 'pm', 'pd', 'fl', 'sms', 'so', 'pa', 'chip'],
+    vendas: ['p', 'dv', 'dvt', 'emp', 'eq', 'sup', 'vend', 'uf', 'sv', 'mr', 'fl', 'con', 'dcon', 'bs', 'bg', 'bm', 'dbs', 'sep', 'cd', 'forma', 'dmax', 'qr', 'pt', 'pm', 'pd', 'pa', 'sms', 'aceOp', 'dacet', 'pos', 'posOp', 'dpos', 'so', 'chip', 'os1', 'dg', 'nt', 'abr'],
+    entregas: ['p', 'dv', 'de', 'emp', 'eq', 'ace', 'pos', 'posOp', 'dpos', 'vend', 'pt', 'pm', 'pd', 'fl', 'sms', 'so', 'pa', 'chip'],
     conectadas: ['p', 'dv', 'da', 'emp', 'eq', 'ace', 'pos', 'pt', 'pm', 'pd', 'fl', 'so', 'chip', 'nt', 'auto'],
     gross: ['dt', 'emp', 'port', 'esim', 'plano', 'doadora', 'ddd', 'prev']
   };
