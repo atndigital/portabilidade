@@ -681,8 +681,23 @@
     root.append(card('Flags de backoffice', '% das vendas com flag.', legendEl(), hbars(topItems(V.filter(r => r.fl), r => r.fl, 14), empsShown(), fP)));
     const eqRows = [...groupBy(V, r => r.eq || '(sem equipe)').entries()].map(([k, a]) => equipeRow(k, a)).filter(r => r.n >= 10);
     root.append(card('Ranking por equipe', 'Portabilidade concluída medida sobre as conectadas (chip em mãos) e sobre as aprovadas.', table(equipeCols(), eqRows, { sortable: true, sortKey: 'pcc', maxh: '460px' })));
-    const vdRows = [...groupBy(V, r => r.vend || '(sem vendedor)').entries()].map(([k, a]) => equipeRow(k, a)).filter(r => r.n >= 20);
-    root.append(card('Ranking por vendedor', 'Vendedores com 20 vendas ou mais no filtro.', table(equipeCols('Vendedor'), vdRows, { sortable: true, sortKey: 'pcc', maxh: '520px' })));
+    // filtros próprios do ranking (empresa e equipe), além dos filtros do topo
+    const rv = Object.assign({ emp: '', eq: '' }, LS.get('rankVend', {}));
+    const sEmp = el('select', { title: 'Empresa' }), sEq = el('select', { title: 'Equipe' }), hold = el('div');
+    sEmp.append(...[['', 'Todas'], ...EMPS.map(e => [e, e])].map(([v, t]) => el('option', { value: v, text: t })));
+    function drawVend() {
+      const eqs = [...new Set(V.filter(r => !rv.emp || r.emp === rv.emp).map(r => r.eq).filter(Boolean))].sort();
+      if (rv.eq && !eqs.includes(rv.eq)) rv.eq = '';
+      sEmp.value = rv.emp; sEq.replaceChildren(el('option', { value: '', text: 'Todas' }), ...eqs.map(q => el('option', { value: q, text: q }))); sEq.value = rv.eq;
+      const base = V.filter(r => (!rv.emp || r.emp === rv.emp) && (!rv.eq || r.eq === rv.eq));
+      const vdRows = [...groupBy(base, r => r.vend || '(sem vendedor)').entries()].map(([k, a]) => equipeRow(k, a)).filter(r => r.n >= 20);
+      hold.replaceChildren(vdRows.length ? table(equipeCols('Vendedor'), vdRows, { sortable: true, sortKey: 'pcc', maxh: '520px' }) : el('p', { class: 'note', text: 'Nenhum vendedor com 20 vendas ou mais nesse filtro.' }));
+    }
+    sEmp.addEventListener('change', () => { rv.emp = sEmp.value; rv.eq = ''; LS.set('rankVend', rv); drawVend(); });
+    sEq.addEventListener('change', () => { rv.eq = sEq.value; LS.set('rankVend', rv); drawVend(); });
+    root.append(card('Ranking por vendedor', 'Vendedores com 20 vendas ou mais no filtro.',
+      el('div', { class: 'filters', style: 'margin:0 0 10px' }, el('label', { class: 'f' }, 'Empresa', sEmp), el('label', { class: 'f' }, 'Equipe', sEq)), hold));
+    drawVend();
   }
   function equipeRow(k, a) {
     const ap = a.filter(r => r.sv === 'APROVADA'), env = a.filter(r => r.bg !== 'Não enviado'), cn = ap.filter(r => r.con);
