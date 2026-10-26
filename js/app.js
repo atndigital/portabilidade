@@ -887,6 +887,20 @@
           const novos = PROC.procGross(PEND[tipo].raw); const meses = new Set(novos.map(r => r.dt.slice(0, 7)));
           const antigos = (RAW[CHAVE[tipo]] || []).filter(r => !meses.has(r.dt.slice(0, 7)));
           base = { versao: 2, tipo, t: PROC.encode([...antigos, ...novos], PROC.COLS.gross) };
+        } else if (tipo === 'vendas' || tipo === 'conectadas') {
+          // o relatório pode vir só com o mês corrente: o arquivo novo manda no que ele traz;
+          // vendas mais antigas que a primeira venda do arquivo continuam da base anterior (até 3 meses)
+          const novos = tipo === 'vendas' ? PROC.procVendas(PEND[tipo].raw) : PROC.procConectadas(PEND[tipo].raw);
+          const ps = new Set(novos.map(r => r.p).filter(Boolean));
+          const dvs = novos.map(r => r.dv).filter(Boolean).sort();
+          let antigos = [];
+          if (dvs.length) {
+            const ini = dvs[0].slice(0, 10), mx = dvs[dvs.length - 1].slice(0, 7);
+            const [y, m] = mx.split('-').map(Number); const lim = new Date(y, m - 3, 1); const limS = `${lim.getFullYear()}-${String(lim.getMonth() + 1).padStart(2, '0')}`;
+            antigos = (RAW[CHAVE[tipo]] || []).filter(r => r.dv && r.dv.slice(0, 10) < ini && r.dv.slice(0, 7) >= limS && !ps.has(r.p));
+          }
+          base = { versao: 2, tipo, t: PROC.encode([...antigos, ...novos], PROC.COLS[tipo]) };
+          if (antigos.length) upMsg(`${NOMES[tipo]}: ${fI(novos.length)} do arquivo + ${fI(antigos.length)} vendas anteriores mantidas da base…`);
         } else base = PROC.build(tipo, PEND[tipo].raw);
         const blob = await gzip(JSON.stringify(base));
         const path = `cargas/${tipo}/${Date.now()}.json.gz`;
