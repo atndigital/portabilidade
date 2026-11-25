@@ -1018,66 +1018,60 @@
   let AN_EQ = '';
   function rAnalise(root) {
     if (!RAW.V) return semBase('vendas', root);
-    const base = LS.get('anBase', 'todas'), met = LS.get('anMet', 'n');
+    const base = LS.get('anBase', 'todas');
     const bh = baseHora(), l24 = new Date(bh.getTime() - 864e5), lim = `${isoLocal(l24)} ${hmLocal(l24)}`;
     const mad = r => !!r.dvt && r.dvt <= lim;
     const V = filt(RAW.V, 'dv').filter(r => r.dv && (base !== 'aprov' || r.sv === 'APROVADA'));
-    const resumo = (k, a) => {
+    const resumo = a => {
       const m = a.filter(mad), n = m.length, c = count(m, r => r.pt === 'C'), p = count(m, r => r.pt === 'P'), x = count(m, r => r.pt === 'N'), s = count(m, r => r.pt === 'S');
-      return { k, emp: count(a, r => r.emp === 'DAHA') > a.length / 2 ? 'DAHA' : 'ATN', n: a.length, ab: a.length - n, mad: n, c, pc: pct(c, n), p, pp: pct(p, n), pcp: pct(c + p, n), x, px: pct(x, n), s, ps: pct(s, n) };
+      return { n: a.length, ab: a.length - n, mad: n, c, pc: pct(c, n), p, pp: pct(p, n), pcp: pct(c + p, n), x, s, ps: pct(s, n) };
     };
-    const MET = { n: ['Vendas', a => a.length || null, fI], pc: ['% concluída', a => resumo('', a).pc, fP], pp: ['% pendente', a => resumo('', a).pp, fP],
-      pcp: ['% pendente + concluída', a => resumo('', a).pcp, fP], ps: ['% vazias', a => resumo('', a).ps, fP], s: ['Vazias (qtd)', a => resumo('', a).s || null, fI] };
-    const [, metFn, metFmt] = MET[met] || MET.n;
+    const empDe = a => count(a, r => r.emp === 'DAHA') > a.length / 2 ? 'DAHA' : 'ATN';
     const dias = [...new Set(V.map(r => r.dv.slice(0, 10)))].sort();
-    const comDias = (o, a) => { const g = groupBy(a, r => r.dv.slice(0, 10)); dias.forEach(d => o['d' + d] = g.has(d) ? metFn(g.get(d)) : null); return o; };
-    const colsBase = (lbl, emp) => [{ t: lbl, k: 'k', l: true }, ...(emp ? [{ t: 'Empresa', k: 'emp', l: true, render: v => empPill(v) }] : []),
-      { t: 'Vendas', k: 'n', f: fI }, { t: 'Até 24h', k: 'ab', f: fI }, { t: 'Concluída', k: 'c', f: fI }, { t: '%', k: 'pc', f: fP }, { t: 'Pendente', k: 'p', f: fI }, { t: '%', k: 'pp', f: fP },
-      { t: '% pend. + concl.', k: 'pcp', f: fP }, { t: 'Não concluída', k: 'x', f: fI }, { t: '%', k: 'px', f: fP }, { t: 'Vazias', k: 's', f: fI }, { t: '%', k: 'ps', f: fP }];
-    const colsDias = rows => {
-      const max = /^p/.test(met) ? 1 : Math.max(1, ...rows.flatMap(r => dias.map(d => r['d' + d] || 0)));
-      const cor = met === 's' || met === 'ps' ? '--bad' : '--s-conc';
-      return dias.map(d => ({ t: fD(d), k: 'd' + d, f: metFmt, style: (v, r) => v && !r._tot ? `background: color-mix(in srgb, var(${cor}) ${Math.round(6 + 44 * Math.min(1, v / max))}%, transparent)` : '' }));
+    // linha: período + uma coluna por data (vendas, % concluída, % pendente, vazias)
+    const linha = (k, a, extra) => {
+      const t = resumo(a), o = Object.assign({ k, emp: empDe(a), n: t.n, ab: t.ab, pcp: t.pcp, s: t.s }, extra || {});
+      const g = groupBy(a, r => r.dv.slice(0, 10));
+      dias.forEach(d => { const x = g.get(d); if (!x) return; const q = resumo(x); o['n' + d] = q.n; o['c' + d] = q.pcp; o['s' + d] = q.mad ? q.s : null; });
+      return o;
+    };
+    const sep = 'border-left:2px solid var(--line)';
+    const pivot = (lbl, rows, emp) => {
+      const fix = [{ t: lbl, k: 'k', l: true }, ...(emp ? [{ t: 'Empresa', k: 'emp', l: true, render: v => empPill(v) }] : [])];
+      const per = [{ t: 'Vendas', k: 'n', f: fI, style: () => sep }, { t: 'Até 24h', k: 'ab', f: fI }, { t: '% SMS respondido', k: 'pcp', f: fP }, { t: 'Vazias', k: 's', f: fI }];
+      const dc = dias.flatMap(d => [{ t: 'Vendas', k: 'n' + d, f: fI, style: () => sep }, { t: '% SMS resp.', k: 'c' + d, f: fP }, { t: 'Vazias', k: 's' + d, f: fI }]);
+      const groups = [{ t: '', span: fix.length }, { t: 'Período', span: per.length }, ...dias.map(d => ({ t: `${fD(d)} ${DSEM[diaSem(d)]}`, span: 3 }))];
+      return { cols: [...fix, ...per, ...dc], groups };
     };
 
-    root.append(el('p', { class: 'lead', text: `Base: relatório de vendas, pela data da venda. O status de portabilidade é definitivo 24h depois da venda (cliente já respondeu o SMS), então os % usam só as vendas feitas até ${fDT(l24)} — 24h antes da base de vendas de ${fDT(bh)}. As mais recentes ficam em "Até 24h". Vazias = venda sem status de portabilidade. Clique numa equipe para ver os operadores.` }));
-
+    root.append(el('p', { class: 'lead', text: `Base: relatório de vendas, pela data da venda. O status de portabilidade é definitivo 24h depois da venda (cliente já respondeu o SMS), então SMS respondido (concluída + pendente) e vazias usam só as vendas feitas até ${fDT(l24)} — 24h antes da base de vendas de ${fDT(bh)}. Datas com "–" ainda estão dentro das 24h. Vazias = venda sem status de portabilidade. Clique numa equipe para ver os operadores.` }));
     const segBase = el('span', { class: 'seg', role: 'group', 'aria-label': 'Base' }, [['todas', 'Todas as vendas'], ['aprov', 'Só aprovadas']].map(([v, t]) =>
       el('button', { type: 'button', 'aria-pressed': String(base === v), onclick: () => { LS.set('anBase', v); render(); } }, t)));
-    const sMet = el('select', { onchange: e => { LS.set('anMet', e.target.value); render(); } }, Object.entries(MET).map(([k, [t]]) => el('option', { value: k, text: t }))); sMet.value = MET[met] ? met : 'n';
-    root.append(el('div', { class: 'filters' }, el('label', { class: 'f' }, 'Base', segBase), el('label', { class: 'f' }, 'Dia a dia mostra', sMet)));
+    root.append(el('div', { class: 'filters' }, el('label', { class: 'f' }, 'Base', segBase)));
 
     const tl = el('div', { class: 'tiles' });
-    const be = {}; empsShown().forEach(e => be[e] = resumo(e, V.filter(r => r.emp === e)));
+    const be = {}; empsShown().forEach(e => be[e] = resumo(V.filter(r => r.emp === e)));
     tl.append(tileEmp('Vendas com 24h ou mais', e => ({ v: fI(be[e].mad), sub: [el('b', { text: fI(be[e].ab) }), ' ainda dentro das 24h'] })));
-    tl.append(tileEmp('Portabilidade concluída', e => ({ v: fP(be[e].pc), sub: [el('b', { text: fI(be[e].c) }), ' vendas'] }), true));
-    tl.append(tileEmp('Portabilidade pendente', e => ({ v: fP(be[e].pp), sub: [el('b', { text: fI(be[e].p) }), ' vendas'] })));
-    tl.append(tileEmp('Pendente + concluída', e => ({ v: fP(be[e].pcp), sub: [el('b', { text: fI(be[e].c + be[e].p) }), ' responderam e seguem'] })));
+    tl.append(tileEmp('SMS respondido (concluída + pendente)', e => ({ v: fP(be[e].pcp), sub: [el('b', { text: fI(be[e].c + be[e].p) }), ' vendas · ', fI(be[e].c), ' concl. + ', fI(be[e].p), ' pend.'] }), true));
     tl.append(tileEmp('Vazias', e => ({ v: fI(be[e].s), sub: [el('b', { text: fP(be[e].ps) }), ' das vendas com 24h+'] })));
     root.append(tl);
 
     const porEq = groupBy(V, r => r.eq || '(sem equipe)');
     if (AN_EQ && !porEq.has(AN_EQ)) AN_EQ = '';
-    const eqRows = [...porEq.entries()].map(([k, a]) => comDias(resumo(k, a), a));
-    const eqCols = colsBase('Equipe', true); eqCols[0].click = r => { AN_EQ = r.k; drawDet(); det.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
-    const tot = comDias(Object.assign(resumo('Total', V), { emp: '', _tot: true }), V);
-    root.append(card('Por equipe', `Período do filtro. Colunas de dia: ${MET[met] ? MET[met][0] : 'Vendas'}.`, table([...eqCols, ...colsDias(eqRows)], eqRows, { sortable: true, sortKey: 'n', total: tot, maxh: '560px' })));
+    const eqRows = [...porEq.entries()].map(([k, a]) => linha(k, a));
+    const pe = pivot('Equipe', eqRows, true);
+    pe.cols[0].click = r => { AN_EQ = r.k; drawDet(); det.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+    root.append(card('Por equipe e data', null, el('div', { class: 'pivot' }, table(pe.cols, eqRows, { groups: pe.groups, sortable: true, sortKey: 'n', total: linha('Total', V, { emp: '' }), maxh: 'none' }))));
 
-    const det = el('div', { style: 'display:flex;flex-direction:column;gap:18px' }); root.append(det);
+    const det = el('div'); root.append(det);
     function drawDet() {
-      const a = AN_EQ ? porEq.get(AN_EQ) : V;
-      const g = groupBy(a, r => r.dv.slice(0, 10));
-      const diaRows = [...g.keys()].sort().map(d => resumo(fD(d) + ' ' + DSEM[diaSem(d)], g.get(d)));
-      const titulo = AN_EQ ? el('h2', null, 'Dia a dia · ', AN_EQ, ' ', empPill(resumo('', a).emp)) : el('h2', { text: 'Dia a dia · todas as equipes do filtro' });
-      const kids = [el('div', { class: 'card' }, el('div', { class: 'row1' }, titulo, AN_EQ ? el('button', { class: 'btn small', onclick: () => { AN_EQ = ''; drawDet(); } }, 'Ver todas as equipes') : null),
-        el('p', { class: 'note', text: 'Dias com "Até 24h" maior que zero ainda não estão fechados.' }),
-        table(colsBase('Data'), diaRows, { total: resumo('Total', a), maxh: '520px' }))];
-      if (AN_EQ) {
-        const opRows = [...groupBy(a, r => r.vend || '(sem vendedor)').entries()].map(([k, x]) => comDias(resumo(k, x), x));
-        kids.push(card(`Operadores · ${AN_EQ}`, `Período do filtro. Colunas de dia: ${MET[met] ? MET[met][0] : 'Vendas'}.`,
-          table([...colsBase('Operador'), ...colsDias(opRows)], opRows, { sortable: true, sortKey: 'n', total: comDias(Object.assign(resumo('Total da equipe', a), { _tot: true }), a), maxh: '560px' })));
-      }
-      det.replaceChildren(...kids);
+      if (!AN_EQ) { det.replaceChildren(); return; }
+      const a = porEq.get(AN_EQ);
+      const opRows = [...groupBy(a, r => r.vend || '(sem vendedor)').entries()].map(([k, x]) => linha(k, x));
+      const po = pivot('Operador', opRows, false);
+      det.replaceChildren(el('div', { class: 'card' },
+        el('div', { class: 'row1' }, el('h2', null, 'Operadores · ', AN_EQ, ' ', empPill(empDe(a))), el('button', { class: 'btn small', onclick: () => { AN_EQ = ''; drawDet(); } }, 'Fechar')),
+        el('div', { class: 'pivot' }, table(po.cols, opRows, { groups: po.groups, sortable: true, sortKey: 'n', total: linha('Total da equipe', a), maxh: 'none' }))));
     }
     drawDet();
   }

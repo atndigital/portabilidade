@@ -140,3 +140,7 @@ td.sel { outline: 2px solid var(--focus); outline-offset: -2px; }
 [hidden] { display: none !important; }
 @media (max-width: 760px) { .top { position: static; } }
 @media print { .top .filters, .tabs, .btn, .toolbar { display: none !important; } .top { position: static; } body { background: #fff; } }
+/* Análise por equipe: primeira coluna fixa na rolagem lateral */
+.pivot tbody td:first-child, .pivot thead tr:not(.grp) th:first-child { position: sticky; left: 0; z-index: 2; background: var(--panel); }
+.pivot thead tr:not(.grp) th:first-child { background: var(--head); z-index: 3; }
+.pivot tr.total td:first-child { background: var(--soft); }
