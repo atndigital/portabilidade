@@ -1094,7 +1094,7 @@
     const tl = el('div', { class: 'tiles' });
     tl.append(tile(`Total a pagar · ${per}`, fR(soma('pr')), `${fI(count(R, r => r.pr))} de ${fI(R.length)} operadores premiados`, true));
     FAIXAS.slice().reverse().forEach(([q, v]) => tl.append(tile(`Faixa ${q}+ · ${fR(v)}`, fI(count(R, r => r.fx === q)), 'operadores')));
-    root.append(el('p', { class: 'lead', text: `Fechamento da semana ${per}: todas as vendas já passaram das 24h, então os números são definitivos (vendas com portabilidade pendente ou concluída = SMS respondido).` }), tl);
+    root.append(el('p', { class: 'lead', text: `Fechamento da semana ${per}: todas as vendas já passaram das 24h, então os números são definitivos (só vendas aprovadas, com portabilidade pendente ou concluída = SMS respondido).` }), tl);
     const pagos = rows.filter(r => r.pr > 0).sort((a, b) => a.k.localeCompare(b.k, 'pt-BR'));
     const dm = d => d.slice(8, 10), dmm = d => d.slice(8, 10) + '.' + d.slice(5, 7);
     const salvar = (wb, nome) => { XLSX.writeFile(wb, nome); };
@@ -1171,7 +1171,8 @@
     const bh = baseHora(), l24 = new Date(bh.getTime() - 864e5), lim = `${isoLocal(l24)} ${hmLocal(l24)}`;
     const mad = r => !!r.dvt && r.dvt <= lim, resp = r => r.pt === 'C' || r.pt === 'P';
     const hoje = isoLocal(bh), atual = segDe(hoje);
-    const V0 = RAW.V.filter(r => r.dv && (!F.emp || r.emp === F.emp));
+    // só vendas aprovadas contam para a premiação (e para o % da semana anterior)
+    const V0 = RAW.V.filter(r => r.dv && r.sv === 'APROVADA' && (!F.emp || r.emp === F.emp));
     const sems = [...new Set([atual, ...V0.map(r => segDe(r.dv.slice(0, 10)))])].sort().reverse();
     if (!sems.includes(PV_SEM)) PV_SEM = atual;
     // semana fechada: a última venda possível (domingo 23:59) já passou das 24h
@@ -1204,7 +1205,7 @@
     const sEq = el('select', { onchange: e => { F.eq = e.target.value; $('#fEq').value = F.eq; render(); } }, el('option', { value: '', text: 'Todas' }), eqOpts.map(q => el('option', { value: q, text: q }))); sEq.value = F.eq;
     root.append(el('div', { class: 'filters' }, el('label', { class: 'f' }, 'Semana', sSem), el('label', { class: 'f' }, 'Equipe', sEq)));
     if (fechada) return fechamento(root, rows, sem, fim);
-    root.append(el('p', { class: 'lead', text: `Premiação semanal por operador: conta as vendas da semana (segunda a sábado, pela data da venda; venda de domingo entra na semana que terminou no sábado) com portabilidade pendente ou concluída (SMS respondido). Base de vendas de ${fDT(bh)}. Vendas com 24h ou mais já têm status definitivo e entram como confirmadas. As que ainda estão dentro das 24h entram na previsão multiplicadas pelo % de SMS respondido do operador na semana anterior (com menos de 10 vendas na semana anterior, usa o % do filtro: ${fP(txGeral)}). A projeção até o fim da semana soma o ritmo de vendas por dia útil (segunda a sábado) nos dias que faltam, com o mesmo %. Os filtros de data do topo não valem nesta aba.` }));
+    root.append(el('p', { class: 'lead', text: `Premiação semanal por operador: conta só as vendas aprovadas da semana (segunda a sábado, pela data da venda; venda de domingo entra na semana que terminou no sábado) com portabilidade pendente ou concluída (SMS respondido). Base de vendas de ${fDT(bh)}. Vendas com 24h ou mais já têm status definitivo e entram como confirmadas. As que ainda estão dentro das 24h entram na previsão multiplicadas pelo % de SMS respondido do operador na semana anterior (com menos de 10 vendas na semana anterior, usa o % do filtro: ${fP(txGeral)}). A projeção até o fim da semana soma o ritmo de vendas por dia útil (segunda a sábado) nos dias que faltam, com o mesmo %. Os filtros de data do topo não valem nesta aba.` }));
 
     const tile = (k, v, sub, hl) => el('div', { class: 'tile' + (hl ? ' hl' : '') }, el('span', { class: 'k', text: k }), el('div', { class: 'pair' }, el('div', { class: 'emp' }, el('span', { class: 'v' }, v), sub ? el('span', { class: 'sub' }, sub) : null)));
     const soma = k => rows.reduce((t, r) => t + (r[k] || 0), 0);
