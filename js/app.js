@@ -1095,14 +1095,60 @@
     tl.append(tile(`Total a pagar · ${per}`, fR(soma('pr')), `${fI(count(R, r => r.pr))} de ${fI(R.length)} operadores premiados`, true));
     FAIXAS.slice().reverse().forEach(([q, v]) => tl.append(tile(`Faixa ${q}+ · ${fR(v)}`, fI(count(R, r => r.fx === q)), 'operadores')));
     root.append(el('p', { class: 'lead', text: `Fechamento da semana ${per}: todas as vendas já passaram das 24h, então os números são definitivos (vendas com portabilidade pendente ou concluída = SMS respondido).` }), tl);
-    const csv = () => {
-      const lin = [['Operador', 'Equipe', 'Vendas na semana', 'SMS respondido', '% SMS respondido', 'Faixa', 'Premio (R$)'].join(';'),
-        ...R.map(r => [r.k, r.eq, r.n, r.conf, r.pct == null ? '' : (r.pct * 100).toFixed(1).replace('.', ','), r.fx || '', String(r.pr || 0).replace('.', ',')].map(x => `"${String(x).replace(/"/g, '""')}"`).join(';'))];
-      baixar(`fechamento_semanal_${sem}_a_${fim}${F.eq ? '_' + F.eq.replace(/\s+/g, '_') : ''}.csv`, new Blob(['﻿' + lin.join('\r\n')], { type: 'text/csv' }));
+    const pagos = rows.filter(r => r.pr > 0).sort((a, b) => a.k.localeCompare(b.k, 'pt-BR'));
+    const dm = d => d.slice(8, 10), dmm = d => d.slice(8, 10) + '.' + d.slice(5, 7);
+    const salvar = (wb, nome) => { XLSX.writeFile(wb, nome); };
+    // Modelo Bee Vale: aba Resumo
+    const beeVale = () => {
+      const aoa = [[' Vendas Tim Portabilidade ', null, null, null, null, { t: 'n', f: `SUM(F4:F${3 + pagos.length})` }], [`Premiação semanal ${fD(sem)} a ${fD(fim)}`],
+        ['Nome', 'Cargo ', 'VALOR SEMANAL', 'PLUS NOITE', 'SEMANA PASSADA', 'Valor da Premiação', 'Supervisor', 'Valor WEX', null, 'WEX'],
+        ...pagos.map((r, i) => [r.k, 'CLT', r.pr, null, null, { t: 'n', f: `SUM(C${4 + i}:E${4 + i})` }, r.sup || null])];
+      const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 38 }, { wch: 8 }, { wch: 15 }, { wch: 12 }, { wch: 16 }, { wch: 18 }, { wch: 34 }, { wch: 11 }, { wch: 3 }, { wch: 8 }];
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Resumo');
+      salvar(wb, `Bee_Vale_Semanal_${dm(sem)}_A_${dmm(fim)}.xlsx`);
     };
+    // Modelo Recarga: email e CPF vêm do arquivo de Recarga anterior, lido só no computador de quem clica
+    const pick = el('input', { type: 'file', accept: '.xls,.xlsx', multiple: true, hidden: true }), rmsg = el('span', { class: 'msg' });
+    pick.addEventListener('change', async () => {
+      const files = [...pick.files]; pick.value = ''; if (!files.length) return;
+      // cadastro: linha da carteira de premiação de cada pessoa (ignora "Premiação Desligados" e as outras carteiras)
+      const cad = new Map();
+      for (const f of files) {
+        try {
+          const wb0 = XLSX.read(await f.arrayBuffer(), { type: 'array' });
+          for (const sn of wb0.SheetNames) for (const x of XLSX.utils.sheet_to_json(wb0.Sheets[sn], { defval: '' })) {
+            const o = {}; for (const k in x) o[PROC.norm(k)] = x[k];
+            const cart = PROC.norm(o.CARTEIRA || '');
+            if (!('EMAIL' in o) || !/^PREMIACAO/.test(cart) || /DESLIGAD/.test(cart)) continue;
+            o._emp = /^POS/i.test(String(o.CATEGORIA || '')) ? 'POS' : 'ATN';
+            const nm = String(o.NOME || ''), par = (nm.match(/\(([^)]+)\)/) || [])[1];
+            [o['NOME COMPLETO COLABORADOR'], par, nm].forEach(k => { const n = PROC.norm(k || ''); if (n && !cad.has(n)) cad.set(n, o); });
+          }
+        } catch (e) { rmsg.className = 'msg err'; rmsg.textContent = `Não consegui ler "${f.name}": ${e.message}`; return; }
+      }
+      const head = ['Nome', 'Email', 'Carteira', 'Benefício', 'Valor', 'Tipo de Recarga', 'Dias úteis', 'Documento de Identificação', 'Nome Completo (Colaborador)', 'Centro de Custo', 'Categoria'];
+      const PADRAO = { ATN: ['Premiação', 'ATN Padrão', 'ATN_CONTACT_CENTER_E_CORRETAGEM_DE_SEGUROS_LTDA'], POS: ['Premiação*', 'POS Padrão', 'POS_POINT_OF_SALE_-_PRODUTOS_COBRANCAS_E_CORRETAGEM_DE_SEGUROS_LTDA'] };
+      const out = { ATN: [], POS: [] }, faltam = [];
+      for (const r of pagos) {
+        const c = cad.get(PROC.norm(r.k)), e = c ? c._emp : 'ATN'; if (!c) faltam.push(r.k);
+        const valor = e === 'POS' ? r.pr.toFixed(2).replace('.', ',') : r.pr; // POS usa valor em texto "20,00", como no modelo
+        out[e].push(c ? [c.NOME, c.EMAIL, c.CARTEIRA, c.BENEFICIO || 'Livre', valor, c['TIPO DE RECARGA'] || 'Mensal', 0, c['DOCUMENTO DE IDENTIFICACAO'], c['NOME COMPLETO COLABORADOR'] || '', c['CENTRO DE CUSTO'] || '', c.CATEGORIA]
+          : [r.k, '', PADRAO.ATN[0], 'Livre', valor, 'Mensal', 0, '', r.k, '', PADRAO.ATN[1]]);
+      }
+      const gerados = [];
+      for (const e of ['ATN', 'POS']) {
+        if (!out[e].length) continue;
+        const ws = XLSX.utils.aoa_to_sheet([head, ...out[e]]); ws['!cols'] = [{ wch: 40 }, { wch: 32 }, { wch: 12 }, { wch: 10 }, { wch: 7 }, { wch: 15 }, { wch: 10 }, { wch: 26 }, { wch: 38 }, { wch: 15 }, { wch: 12 }];
+        const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Recarga');
+        salvar(wb, `${PADRAO[e][2]}_SEMANAL_${dm(sem)}_A_${dm(fim)}${fim.slice(5, 7)}_PORTABILIDADE.xlsx`); gerados.push(`${e} (${out[e].length})`);
+      }
+      rmsg.className = 'msg ' + (faltam.length ? 'err' : 'ok');
+      rmsg.textContent = `Recarga gerada: ${gerados.join(' e ')}.` + (faltam.length ? ` Sem cadastro, foram no arquivo ATN sem email e CPF: ${faltam.join(', ')}.` : '');
+    });
     const cols = [{ t: 'Operador', k: 'k', l: true }, ...(F.eq ? [] : [{ t: 'Equipe', k: 'eq', l: true }]), { t: 'Vendas na semana', k: 'n', f: fI }, { t: 'SMS respondido', k: 'conf', f: fI },
       { t: '% SMS respondido', k: 'pct', f: fP }, { t: 'Faixa', k: 'fx', f: fI }, { t: 'Prêmio', k: 'pr', f: fR, cls: v => v ? 'good' : '' }];
-    root.append(el('div', { class: 'card' }, el('div', { class: 'row1' }, el('h2', { text: `Fechamento por operador · ${per}` }), el('button', { class: 'btn primary', onclick: csv }, 'Baixar fechamento (CSV)')),
+    root.append(el('div', { class: 'card' }, el('div', { class: 'row1' }, el('h2', { text: `Fechamento por operador · ${per}` }), el('span', { class: 'toolbar' }, el('button', { class: 'btn primary', onclick: beeVale, disabled: !pagos.length }, 'Baixar Bee Vale'), el('button', { class: 'btn primary', onclick: () => pick.click(), disabled: !pagos.length, title: 'Escolha os últimos arquivos de Recarga (ATN e POS): o painel copia email e CPF de quem já está neles' }, 'Baixar Recarga'), pick)),
+      el('p', { class: 'note', text: 'Os arquivos saem só com os operadores premiados. Em "Baixar Recarga", escolha juntos os últimos arquivos de Recarga da ATN e da POS: o painel lê no seu computador, copia email, CPF, carteira e categoria de cada pessoa e gera um arquivo por empresa (nada disso é salvo no painel). Plus noite e semana passada ficam para preencher no Bee Vale.' }), rmsg,
       R.length ? table(cols, R, { sortable: true, sortKey: 'conf', total: { k: 'Total', n: soma('n'), conf: soma('conf'), pct: pct(soma('conf'), soma('n')), pr: soma('pr') }, maxh: '620px' }) : el('p', { class: 'note', text: 'Nenhuma venda nessa semana com esse filtro.' })));
     if (!F.eq) {
       const E = [...groupBy(R, r => r.eq || '(sem equipe)').entries()].map(([k, a]) => ({ k, ops: a.length, prem: count(a, r => r.pr), n: a.reduce((t, r) => t + r.n, 0), conf: a.reduce((t, r) => t + r.conf, 0), pr: a.reduce((t, r) => t + r.pr, 0) }));
@@ -1113,7 +1159,7 @@
   }
 
   /* ================= Previsão semanal (premiação por operador) ================= */
-  // Conta vendas da semana (segunda a domingo, pela data da venda) com portabilidade pendente ou concluída = SMS respondido.
+  // Conta vendas da semana (segunda a sábado + domingo seguinte, pela data da venda) com portabilidade pendente ou concluída = SMS respondido.
   const FAIXAS = [[18, 20], [22, 30], [28, 40], [32, 50], [40, 100]];
   const faixaDe = n => { let f = null; for (const x of FAIXAS) if (n >= x[0]) f = x; return f; };
   const proxFaixa = n => FAIXAS.find(x => n < x[0]) || null;
@@ -1130,7 +1176,7 @@
     if (!sems.includes(PV_SEM)) PV_SEM = atual;
     // semana fechada: a última venda possível (domingo 23:59) já passou das 24h
     const fechou = d => lim >= `${nd(dn(d) + 8)} 00:00`;
-    const sem = PV_SEM, fim = nd(dn(sem) + 6), ant = nd(dn(sem) - 7), fechada = fechou(sem);
+    const sem = PV_SEM, fim = nd(dn(sem) + 5), ant = nd(dn(sem) - 7), fechada = fechou(sem);
     const naSem = (r, ini) => { const d = r.dv.slice(0, 10); return d >= ini && d <= nd(dn(ini) + 6); };
     const doEq = r => !F.eq || r.eq === F.eq;
     const S = V0.filter(r => doEq(r) && naSem(r, sem)), A = V0.filter(r => doEq(r) && naSem(r, ant));
@@ -1147,17 +1193,18 @@
       const prev = conf + ab * txp, proj = prev + (a.length / corridos) * faltam * txp;
       const fx = faixaDe(Math.floor(prev)), nx = proxFaixa(Math.floor(prev)), fp = faixaDe(Math.floor(proj));
       const fal = nx ? Math.ceil(nx[0] - prev) : null;
-      return { k: op, eq: (groupBy(a, r => r.eq).keys().next().value) || '', n: a.length, conf, ab, tx, prev, fx: fx ? fx[0] : null, pr: fx ? fx[1] : 0,
+      const maisFreq = f => [...groupBy(a.filter(f), f).entries()].sort((x, y) => y[1].length - x[1].length).map(x => x[0])[0] || '';
+      return { k: op, eq: maisFreq(r => r.eq), sup: maisFreq(r => r.sup), n: a.length, conf, ab, tx, prev, fx: fx ? fx[0] : null, pr: fx ? fx[1] : 0,
         nx: nx ? nx[0] : null, nxv: nx ? nx[1] : null, fal, vn: fal && txp ? Math.ceil(fal / txp) : null, proj, prp: fp ? fp[1] : 0 };
     });
 
 
-    const sSem = el('select', { onchange: e => { PV_SEM = e.target.value; render(); } }, sems.map(d => el('option', { value: d, text: `${fD(d)} a ${fD(nd(dn(d) + 6))}${d === atual ? ' (atual)' : fechou(d) ? ' · fechada' : ' · em fechamento'}` }))); sSem.value = sem;
+    const sSem = el('select', { onchange: e => { PV_SEM = e.target.value; render(); } }, sems.map(d => el('option', { value: d, text: `${fD(d)} a ${fD(nd(dn(d) + 5))}${d === atual ? ' (atual)' : fechou(d) ? ' · fechada' : ' · em fechamento'}` }))); sSem.value = sem;
     const eqOpts = [...new Set(V0.map(r => r.eq).filter(Boolean))].sort();
     const sEq = el('select', { onchange: e => { F.eq = e.target.value; $('#fEq').value = F.eq; render(); } }, el('option', { value: '', text: 'Todas' }), eqOpts.map(q => el('option', { value: q, text: q }))); sEq.value = F.eq;
     root.append(el('div', { class: 'filters' }, el('label', { class: 'f' }, 'Semana', sSem), el('label', { class: 'f' }, 'Equipe', sEq)));
     if (fechada) return fechamento(root, rows, sem, fim);
-    root.append(el('p', { class: 'lead', text: `Premiação semanal por operador: conta as vendas da semana (segunda a domingo, pela data da venda) com portabilidade pendente ou concluída (SMS respondido). Base de vendas de ${fDT(bh)}. Vendas com 24h ou mais já têm status definitivo e entram como confirmadas. As que ainda estão dentro das 24h entram na previsão multiplicadas pelo % de SMS respondido do operador na semana anterior (com menos de 10 vendas na semana anterior, usa o % do filtro: ${fP(txGeral)}). A projeção até o fim da semana soma o ritmo de vendas por dia útil (segunda a sábado) nos dias que faltam, com o mesmo %. Os filtros de data do topo não valem nesta aba.` }));
+    root.append(el('p', { class: 'lead', text: `Premiação semanal por operador: conta as vendas da semana (segunda a sábado, pela data da venda; venda de domingo entra na semana que terminou no sábado) com portabilidade pendente ou concluída (SMS respondido). Base de vendas de ${fDT(bh)}. Vendas com 24h ou mais já têm status definitivo e entram como confirmadas. As que ainda estão dentro das 24h entram na previsão multiplicadas pelo % de SMS respondido do operador na semana anterior (com menos de 10 vendas na semana anterior, usa o % do filtro: ${fP(txGeral)}). A projeção até o fim da semana soma o ritmo de vendas por dia útil (segunda a sábado) nos dias que faltam, com o mesmo %. Os filtros de data do topo não valem nesta aba.` }));
 
     const tile = (k, v, sub, hl) => el('div', { class: 'tile' + (hl ? ' hl' : '') }, el('span', { class: 'k', text: k }), el('div', { class: 'pair' }, el('div', { class: 'emp' }, el('span', { class: 'v' }, v), sub ? el('span', { class: 'sub' }, sub) : null)));
     const soma = k => rows.reduce((t, r) => t + (r[k] || 0), 0);
@@ -1165,7 +1212,7 @@
     tl.append(tile('Prêmio previsto (até agora)', fR(soma('pr')), `${fI(count(rows, r => r.fx))} de ${fI(rows.length)} operadores em alguma faixa`, true));
     tl.append(tile('Prêmio projetado (fim da semana)', fR(soma('prp')), `${fI(count(rows, r => r.prp))} operadores em alguma faixa`));
     tl.append(tile('Perto da próxima faixa', fI(count(rows, r => r.fal != null && r.fal <= 3)), 'faltam 3 ou menos respondidas'));
-    tl.append(tile('% SMS respondido da semana anterior', fP(txGeral), `${fD(ant)} a ${fD(nd(dn(ant) + 6))}`));
+    tl.append(tile('% SMS respondido da semana anterior', fP(txGeral), `${fD(ant)} a ${fD(nd(dn(ant) + 5))}`));
     root.append(tl);
 
     const cols = [{ t: 'Operador', k: 'k', l: true }, ...(F.eq ? [] : [{ t: 'Equipe', k: 'eq', l: true }]), { t: 'Vendas na semana', k: 'n', f: fI },
