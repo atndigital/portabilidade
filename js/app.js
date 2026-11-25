@@ -1047,7 +1047,16 @@
     root.append(el('p', { class: 'lead', text: `Base: relatório de vendas, pela data da venda. O status de portabilidade é definitivo 24h depois da venda (cliente já respondeu o SMS), então SMS respondido (concluída + pendente) e vazias usam só as vendas feitas até ${fDT(l24)} — 24h antes da base de vendas de ${fDT(bh)}. Datas com "–" ainda estão dentro das 24h. Vazias = venda sem status de portabilidade. Clique numa equipe para ver os operadores.` }));
     const segBase = el('span', { class: 'seg', role: 'group', 'aria-label': 'Base' }, [['todas', 'Todas as vendas'], ['aprov', 'Só aprovadas']].map(([v, t]) =>
       el('button', { type: 'button', 'aria-pressed': String(base === v), onclick: () => { LS.set('anBase', v); render(); } }, t)));
-    root.append(el('div', { class: 'filters' }, el('label', { class: 'f' }, 'Base', segBase)));
+    // filtros da aba: equipe e datas (os mesmos do topo, sincronizados)
+    const setF = (k, v, sel) => { F[k] = v; if (sel) $(sel).value = v; render(); };
+    const eqOpts = [...new Set(RAW.V.filter(r => !F.emp || r.emp === F.emp).map(r => r.eq).filter(Boolean))].sort();
+    const sEq = el('select', { onchange: e => setF('eq', e.target.value, '#fEq') }, el('option', { value: '', text: 'Todas' }), eqOpts.map(q => el('option', { value: q, text: q }))); sEq.value = F.eq;
+    const iIni = el('input', { type: 'date', value: F.ini, onchange: e => setF('ini', e.target.value, '#fIni') });
+    const iFim = el('input', { type: 'date', value: F.fim, onchange: e => setF('fim', e.target.value, '#fFim') });
+    const hoje = isoLocal(bh), atalho = (t, ini, fim) => el('button', { type: 'button', class: 'btn small', onclick: () => { F.ini = ini; F.fim = fim; $('#fIni').value = ini; $('#fFim').value = fim; render(); } }, t);
+    const limpar = el('button', { type: 'button', class: 'btn small', onclick: () => { F.eq = F.ini = F.fim = ''; ['#fEq', '#fIni', '#fFim'].forEach(x => $(x).value = ''); render(); } }, 'Limpar');
+    root.append(el('div', { class: 'filters' }, el('label', { class: 'f' }, 'Base', segBase), el('label', { class: 'f' }, 'Equipe', sEq), el('label', { class: 'f' }, 'De', iIni), el('label', { class: 'f' }, 'Até', iFim),
+      atalho('Últimos 7 dias', nd(dn(hoje) - 6), hoje), atalho('Mês atual', hoje.slice(0, 8) + '01', hoje), limpar));
 
     const tl = el('div', { class: 'tiles' });
     const be = {}; empsShown().forEach(e => be[e] = resumo(V.filter(r => r.emp === e)));
@@ -1058,6 +1067,7 @@
 
     const porEq = groupBy(V, r => r.eq || '(sem equipe)');
     if (AN_EQ && !porEq.has(AN_EQ)) AN_EQ = '';
+    if (F.eq && porEq.has(F.eq)) AN_EQ = F.eq;
     const eqRows = [...porEq.entries()].map(([k, a]) => linha(k, a));
     const pe = pivot('Equipe', eqRows, true);
     pe.cols[0].click = r => { AN_EQ = r.k; drawDet(); det.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
