@@ -1086,7 +1086,101 @@
     drawDet();
   }
 
-  const RENDER = { geral: rGeral, analise: rAnalise, gross: rGross, tratativa: rTratativa, port: rPort, entrega: rEntrega, vendas: rVendas, conect: rConect, melhoria: rMelhoria };
+  function fechamento(root, rows, sem, fim) {
+    const per = `${fD(sem)} a ${fD(fim)}`;
+    const R = rows.map(r => ({ k: r.k, eq: r.eq, n: r.n, conf: r.conf, pct: pct(r.conf, r.n), fx: r.fx, pr: r.pr })).sort((a, b) => b.conf - a.conf);
+    const soma = k => R.reduce((t, r) => t + (r[k] || 0), 0);
+    const tile = (k, v, sub, hl) => el('div', { class: 'tile' + (hl ? ' hl' : '') }, el('span', { class: 'k', text: k }), el('div', { class: 'pair' }, el('div', { class: 'emp' }, el('span', { class: 'v' }, v), sub ? el('span', { class: 'sub' }, sub) : null)));
+    const tl = el('div', { class: 'tiles' });
+    tl.append(tile(`Total a pagar · ${per}`, fR(soma('pr')), `${fI(count(R, r => r.pr))} de ${fI(R.length)} operadores premiados`, true));
+    FAIXAS.slice().reverse().forEach(([q, v]) => tl.append(tile(`Faixa ${q}+ · ${fR(v)}`, fI(count(R, r => r.fx === q)), 'operadores')));
+    root.append(el('p', { class: 'lead', text: `Fechamento da semana ${per}: todas as vendas já passaram das 24h, então os números são definitivos (vendas com portabilidade pendente ou concluída = SMS respondido).` }), tl);
+    const csv = () => {
+      const lin = [['Operador', 'Equipe', 'Vendas na semana', 'SMS respondido', '% SMS respondido', 'Faixa', 'Premio (R$)'].join(';'),
+        ...R.map(r => [r.k, r.eq, r.n, r.conf, r.pct == null ? '' : (r.pct * 100).toFixed(1).replace('.', ','), r.fx || '', String(r.pr || 0).replace('.', ',')].map(x => `"${String(x).replace(/"/g, '""')}"`).join(';'))];
+      baixar(`fechamento_semanal_${sem}_a_${fim}${F.eq ? '_' + F.eq.replace(/\s+/g, '_') : ''}.csv`, new Blob(['﻿' + lin.join('\r\n')], { type: 'text/csv' }));
+    };
+    const cols = [{ t: 'Operador', k: 'k', l: true }, ...(F.eq ? [] : [{ t: 'Equipe', k: 'eq', l: true }]), { t: 'Vendas na semana', k: 'n', f: fI }, { t: 'SMS respondido', k: 'conf', f: fI },
+      { t: '% SMS respondido', k: 'pct', f: fP }, { t: 'Faixa', k: 'fx', f: fI }, { t: 'Prêmio', k: 'pr', f: fR, cls: v => v ? 'good' : '' }];
+    root.append(el('div', { class: 'card' }, el('div', { class: 'row1' }, el('h2', { text: `Fechamento por operador · ${per}` }), el('button', { class: 'btn primary', onclick: csv }, 'Baixar fechamento (CSV)')),
+      R.length ? table(cols, R, { sortable: true, sortKey: 'conf', total: { k: 'Total', n: soma('n'), conf: soma('conf'), pct: pct(soma('conf'), soma('n')), pr: soma('pr') }, maxh: '620px' }) : el('p', { class: 'note', text: 'Nenhuma venda nessa semana com esse filtro.' })));
+    if (!F.eq) {
+      const E = [...groupBy(R, r => r.eq || '(sem equipe)').entries()].map(([k, a]) => ({ k, ops: a.length, prem: count(a, r => r.pr), n: a.reduce((t, r) => t + r.n, 0), conf: a.reduce((t, r) => t + r.conf, 0), pr: a.reduce((t, r) => t + r.pr, 0) }));
+      root.append(card('Fechamento por equipe', null, table([{ t: 'Equipe', k: 'k', l: true }, { t: 'Operadores', k: 'ops', f: fI }, { t: 'Premiados', k: 'prem', f: fI }, { t: 'Vendas', k: 'n', f: fI }, { t: 'SMS respondido', k: 'conf', f: fI }, { t: 'Total a pagar', k: 'pr', f: fR }],
+        E, { sortable: true, sortKey: 'pr', total: { k: 'Total', ops: soma('ops') || R.length, prem: count(R, r => r.pr), n: soma('n'), conf: soma('conf'), pr: soma('pr') }, maxh: 'none' })));
+    }
+    root.append(card('Tabela de premiação semanal', null, table([{ t: 'SMS respondido na semana', k: 'q', l: true }, { t: 'Prêmio', k: 'v', f: fR }], FAIXAS.map(([q, v]) => ({ q: `${q} ou mais`, v })), { maxh: 'none' })));
+  }
+
+  /* ================= Previsão semanal (premiação por operador) ================= */
+  // Conta vendas da semana (segunda a domingo, pela data da venda) com portabilidade pendente ou concluída = SMS respondido.
+  const FAIXAS = [[18, 20], [22, 30], [28, 40], [32, 50], [40, 100]];
+  const faixaDe = n => { let f = null; for (const x of FAIXAS) if (n >= x[0]) f = x; return f; };
+  const proxFaixa = n => FAIXAS.find(x => n < x[0]) || null;
+  const fR = v => v == null || isNaN(v) ? '–' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const segDe = iso => nd(dn(iso) - (diaSem(iso) + 6) % 7);
+  let PV_SEM = '';
+  function rPrevisao(root) {
+    if (!RAW.V) return semBase('vendas', root);
+    const bh = baseHora(), l24 = new Date(bh.getTime() - 864e5), lim = `${isoLocal(l24)} ${hmLocal(l24)}`;
+    const mad = r => !!r.dvt && r.dvt <= lim, resp = r => r.pt === 'C' || r.pt === 'P';
+    const hoje = isoLocal(bh), atual = segDe(hoje);
+    const V0 = RAW.V.filter(r => r.dv && (!F.emp || r.emp === F.emp));
+    const sems = [...new Set([atual, ...V0.map(r => segDe(r.dv.slice(0, 10)))])].sort().reverse();
+    if (!sems.includes(PV_SEM)) PV_SEM = atual;
+    // semana fechada: a última venda possível (domingo 23:59) já passou das 24h
+    const fechou = d => lim >= `${nd(dn(d) + 8)} 00:00`;
+    const sem = PV_SEM, fim = nd(dn(sem) + 6), ant = nd(dn(sem) - 7), fechada = fechou(sem);
+    const naSem = (r, ini) => { const d = r.dv.slice(0, 10); return d >= ini && d <= nd(dn(ini) + 6); };
+    const doEq = r => !F.eq || r.eq === F.eq;
+    const S = V0.filter(r => doEq(r) && naSem(r, sem)), A = V0.filter(r => doEq(r) && naSem(r, ant));
+    // % de SMS respondido da semana anterior: do operador (10+ vendas com 24h) ou, se não tiver, da equipe/filtro
+    const taxa = a => { const m = a.filter(mad); return m.length ? count(m, resp) / m.length : null; };
+    const txGeral = taxa(A), gA = groupBy(A, r => r.vend || '(sem vendedor)');
+    const txOp = op => { const a = (gA.get(op) || []).filter(mad); return a.length >= 10 ? count(a, resp) / a.length : txGeral; };
+    // ritmo: dias úteis (segunda a sábado) já corridos e que faltam na semana
+    const corridos = sem === atual ? Math.min(6, dn(hoje) - dn(sem) + 1) : 6, faltam = sem === atual ? Math.max(0, 5 - (dn(hoje) - dn(sem))) : 0;
+
+    const rows = [...groupBy(S, r => r.vend || '(sem vendedor)').entries()].map(([op, a]) => {
+      const tx = txOp(op), txp = tx || 0;
+      const conf = count(a, r => mad(r) && resp(r)), ab = count(a, r => !mad(r));
+      const prev = conf + ab * txp, proj = prev + (a.length / corridos) * faltam * txp;
+      const fx = faixaDe(Math.floor(prev)), nx = proxFaixa(Math.floor(prev)), fp = faixaDe(Math.floor(proj));
+      const fal = nx ? Math.ceil(nx[0] - prev) : null;
+      return { k: op, eq: (groupBy(a, r => r.eq).keys().next().value) || '', n: a.length, conf, ab, tx, prev, fx: fx ? fx[0] : null, pr: fx ? fx[1] : 0,
+        nx: nx ? nx[0] : null, nxv: nx ? nx[1] : null, fal, vn: fal && txp ? Math.ceil(fal / txp) : null, proj, prp: fp ? fp[1] : 0 };
+    });
+
+
+    const sSem = el('select', { onchange: e => { PV_SEM = e.target.value; render(); } }, sems.map(d => el('option', { value: d, text: `${fD(d)} a ${fD(nd(dn(d) + 6))}${d === atual ? ' (atual)' : fechou(d) ? ' · fechada' : ' · em fechamento'}` }))); sSem.value = sem;
+    const eqOpts = [...new Set(V0.map(r => r.eq).filter(Boolean))].sort();
+    const sEq = el('select', { onchange: e => { F.eq = e.target.value; $('#fEq').value = F.eq; render(); } }, el('option', { value: '', text: 'Todas' }), eqOpts.map(q => el('option', { value: q, text: q }))); sEq.value = F.eq;
+    root.append(el('div', { class: 'filters' }, el('label', { class: 'f' }, 'Semana', sSem), el('label', { class: 'f' }, 'Equipe', sEq)));
+    if (fechada) return fechamento(root, rows, sem, fim);
+    root.append(el('p', { class: 'lead', text: `Premiação semanal por operador: conta as vendas da semana (segunda a domingo, pela data da venda) com portabilidade pendente ou concluída (SMS respondido). Base de vendas de ${fDT(bh)}. Vendas com 24h ou mais já têm status definitivo e entram como confirmadas. As que ainda estão dentro das 24h entram na previsão multiplicadas pelo % de SMS respondido do operador na semana anterior (com menos de 10 vendas na semana anterior, usa o % do filtro: ${fP(txGeral)}). A projeção até o fim da semana soma o ritmo de vendas por dia útil (segunda a sábado) nos dias que faltam, com o mesmo %. Os filtros de data do topo não valem nesta aba.` }));
+
+    const tile = (k, v, sub, hl) => el('div', { class: 'tile' + (hl ? ' hl' : '') }, el('span', { class: 'k', text: k }), el('div', { class: 'pair' }, el('div', { class: 'emp' }, el('span', { class: 'v' }, v), sub ? el('span', { class: 'sub' }, sub) : null)));
+    const soma = k => rows.reduce((t, r) => t + (r[k] || 0), 0);
+    const tl = el('div', { class: 'tiles' });
+    tl.append(tile('Prêmio previsto (até agora)', fR(soma('pr')), `${fI(count(rows, r => r.fx))} de ${fI(rows.length)} operadores em alguma faixa`, true));
+    tl.append(tile('Prêmio projetado (fim da semana)', fR(soma('prp')), `${fI(count(rows, r => r.prp))} operadores em alguma faixa`));
+    tl.append(tile('Perto da próxima faixa', fI(count(rows, r => r.fal != null && r.fal <= 3)), 'faltam 3 ou menos respondidas'));
+    tl.append(tile('% SMS respondido da semana anterior', fP(txGeral), `${fD(ant)} a ${fD(nd(dn(ant) + 6))}`));
+    root.append(tl);
+
+    const cols = [{ t: 'Operador', k: 'k', l: true }, ...(F.eq ? [] : [{ t: 'Equipe', k: 'eq', l: true }]), { t: 'Vendas na semana', k: 'n', f: fI },
+      { t: 'Respondidas confirmadas', k: 'conf', f: fI }, { t: 'Em aberto (até 24h)', k: 'ab', f: fI }, { t: '% resp. sem. anterior', k: 'tx', f: fP },
+      { t: 'Previsão', k: 'prev', f: fI }, { t: 'Faixa', k: 'fx', f: fI }, { t: 'Prêmio', k: 'pr', f: fR, cls: v => v ? 'good' : '' },
+      { t: 'Próxima faixa', k: 'nx', f: (v, r) => `${v} · ${fR(r.nxv)}` }, { t: 'Faltam respondidas', k: 'fal', f: fI, cls: v => v != null && v <= 3 ? 'warn' : '' }, { t: '≈ vendas p/ chegar', k: 'vn', f: fI },
+      { t: 'Projeção fim da semana', k: 'proj', f: fI }, { t: 'Prêmio projetado', k: 'prp', f: fR }];
+    const tot = { k: 'Total', n: soma('n'), conf: soma('conf'), ab: soma('ab'), prev: soma('prev'), pr: soma('pr'), proj: soma('proj'), prp: soma('prp') };
+    root.append(card('Previsão por operador', '"Faltam respondidas" e "≈ vendas p/ chegar" contam a partir da previsão de agora; as vendas necessárias usam o % de SMS respondido da semana anterior.',
+      rows.length ? table(cols, rows, { sortable: true, sortKey: 'prev', total: tot, maxh: '620px' }) : el('p', { class: 'note', text: 'Nenhuma venda nessa semana com esse filtro.' })));
+    root.append(card('Tabela de premiação semanal', 'Vendas com SMS respondido (pendente + concluída) na semana.',
+      table([{ t: 'Respondidas na semana', k: 'q', l: true }, { t: 'Prêmio', k: 'v', f: fR }], FAIXAS.map(([q, v]) => ({ q: `${q} ou mais`, v })), { maxh: 'none' })));
+  }
+
+  const RENDER = { geral: rGeral, analise: rAnalise, previsao: rPrevisao, gross: rGross, tratativa: rTratativa, port: rPort, entrega: rEntrega, vendas: rVendas, conect: rConect, melhoria: rMelhoria };
   function render() {
     destroyCharts();
     const root = $('#content'); root.replaceChildren();
